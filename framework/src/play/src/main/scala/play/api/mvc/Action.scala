@@ -226,7 +226,7 @@ object BodyParser {
  * @tparam R the type of the request on which this is invoked (input)
  * @tparam P the parameter type which blocks executed by this builder take (output)
  */
-trait ActionFunction[-R[_], P[_]] {
+trait ActionFunction[-R[_], +P[_]] {
   self =>
 
   /**
@@ -255,7 +255,7 @@ trait ActionFunction[-R[_], P[_]] {
 /**
  * Provides helpers for creating `Action` values.
  */
-trait ActionBuilder[R[_]] extends ActionFunction[Request, R] {
+trait ActionBuilder[+R[_]] extends ActionFunction[Request, R] {
   self =>
 
   /**
@@ -419,7 +419,7 @@ object Action extends ActionBuilder[Request] {
  * its Action block with a parameter (of type P).
  * The critical (abstract) function is refine.
  */
-trait ActionRefiner[-R[_], P[_]] extends ActionFunction[R, P] {
+trait ActionRefiner[-R[_], +P[_]] extends ActionFunction[R, P] {
   /**
    * Determine how to process a request.  This is the main method than an ActionRefiner has to implement.
    * It can decide to immediately intercept the request and return a SimpleResult (Left), or continue processing with a new parameter of type P (Right).
@@ -438,7 +438,7 @@ trait ActionRefiner[-R[_], P[_]] extends ActionFunction[R, P] {
  * unconditionally transforms it to a new parameter type (P) to be passed to
  * its Action block.  The critical (abstract) function is transform.
  */
-trait ActionTransformer[-R[_], P[_]] extends ActionRefiner[R, P] {
+trait ActionTransformer[-R[_], +P[_]] extends ActionRefiner[R, P] {
   /**
    * Augment or transform an existing request.  This is the main method than an ActionTransformer has to implement.
    *
