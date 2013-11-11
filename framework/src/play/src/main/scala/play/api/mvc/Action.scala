@@ -240,7 +240,7 @@ trait ActionFunction[-R[_], +P[_]] {
   def invokeBlock[A](request: R[A], block: P[A] => Future[SimpleResult]): Future[SimpleResult]
 
   /**
-   * Compose this ActionFunction with another.
+   * Compose this ActionFunction with another, with this one applied first.
    *
    * @param other ActionFunction with which to compose
    * @return The new ActionFunction
@@ -249,6 +249,18 @@ trait ActionFunction[-R[_], +P[_]] {
     def invokeBlock[A](request: R[A], block: Q[A] => Future[SimpleResult]) =
       self.invokeBlock[A](request, other.invokeBlock[A](_, block))
   }
+
+  /**
+   * Compose another ActionFunction with this one, with this one applied last.
+   *
+   * @param other ActionFunction with which to compose
+   * @return The new ActionFunction
+   */
+  def compose[Q[_]](other: ActionFunction[Q, R]): ActionFunction[Q, P] =
+    other.andThen(this)
+
+  def compose(other: ActionBuilder[R]): ActionBuilder[P] =
+    other.andThen(this)
 
 }
 
