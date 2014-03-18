@@ -128,17 +128,17 @@ object Security {
    * @param userinfo The function that looks up the user info.
    * @param onUnauthorized The function to get the result for when no authenticated user can be found.
    */
-  class AuthenticatedBuilder[U](userinfo: RequestHeader => Option[U],
+  class AuthenticatedBuilder[U, A](userinfo: RequestHeader => Option[U],
     onUnauthorized: RequestHeader => SimpleResult = _ => Unauthorized(views.html.defaultpages.unauthorized()))
-      extends ActionBuilder[({ type R[A] = AuthenticatedRequest[A, U] })#R] {
+      extends ActionBuilderFunction[({ type R[A] = AuthenticatedRequest[A, U] })#R, A] {
 
-    def invokeBlock[A](request: Request[A], block: (AuthenticatedRequest[A, U]) => Future[SimpleResult]) =
+    def invokeBlock(request: Request[A], block: (AuthenticatedRequest[A, U]) => Future[SimpleResult]) =
       authenticate(request, block)
 
     /**
      * Authenticate the given block.
      */
-    def authenticate[A](request: Request[A], block: (AuthenticatedRequest[A, U]) => Future[SimpleResult]) = {
+    def authenticate(request: Request[A], block: (AuthenticatedRequest[A, U]) => Future[SimpleResult]) = {
       userinfo(request).map { user =>
         block(new AuthenticatedRequest(user, request))
       } getOrElse {
@@ -188,13 +188,13 @@ object Security {
      * @param userinfo The function that looks up the user info.
      * @param onUnauthorized The function to get the result for when no authenticated user can be found.
      */
-    def apply[U](userinfo: RequestHeader => Option[U],
-      onUnauthorized: RequestHeader => SimpleResult = _ => Unauthorized(views.html.defaultpages.unauthorized())): AuthenticatedBuilder[U] = new AuthenticatedBuilder(userinfo, onUnauthorized)
+    def apply[U, A](userinfo: RequestHeader => Option[U],
+      onUnauthorized: RequestHeader => SimpleResult = _ => Unauthorized(views.html.defaultpages.unauthorized())): AuthenticatedBuilder[U, A] = new AuthenticatedBuilder[U, A](userinfo, onUnauthorized)
 
     /**
      * Simple authenticated action builder that looks up the username from the session
      */
-    def apply(): AuthenticatedBuilder[String] = apply[String](req => req.session.get(username))
+    def apply[A](): AuthenticatedBuilder[String, A] = apply[String, A](req => req.session.get(username))
   }
 }
 

@@ -361,7 +361,7 @@ trait ActionFunction[-R, +P] {
    *
    * @return The execution context
    */
-  protected def executionContext: ExecutionContext = play.api.libs.concurrent.Execution.defaultContext
+  def executionContext: ExecutionContext = play.api.libs.concurrent.Execution.defaultContext
 
 }
 
@@ -377,7 +377,18 @@ object ActionFunction {
 
 trait HigherOrderActionFunction[-R[_], +P[_], A] extends ActionFunction[R[A], P[A]]
 
-trait GenericActionBuilder[+R[_], A] extends HigherOrderActionFunction[Request, R, A] {
+trait ActionBuilderFunction[+P[_], A] extends HigherOrderActionFunction[Request, P, A]
+
+object HigherOrderActionFunction {
+  def identity[A]: ActionBuilderFunction[Request, A] = new ActionBuilderFunction[Request, A] {
+    def invokeBlock(request: Request[A], block: Request[A] => Future[SimpleResult]) = block(request)
+  }
+}
+
+/**
+ * Provides helpers for creating `Action` values.
+ */
+class GenericActionBuilder[+R[_], A](invoker: HigherOrderActionFunction[Request, R, A]) {
 
   /**
    * Constructs an `Action`.
@@ -419,14 +430,14 @@ trait GenericActionBuilder[+R[_], A] extends HigherOrderActionFunction[Request, 
   final def async(bodyParser: BodyParser[A])(block: R[A] => Future[SimpleResult]): Action[A] = composeAction(new Action[A] {
     def parser = composeParser(bodyParser)
     def apply(request: Request[A]) = try {
-      invokeBlock(request, block)
+      invoker.invokeBlock(request, block)
     } catch {
       // NotImplementedError is not caught by NonFatal, wrap it
       case e: NotImplementedError => throw new RuntimeException(e)
       // LinkageError is similarly harmless in Play Framework, since automatic reloading could easily trigger it
       case e: LinkageError => throw new RuntimeException(e)
     }
-    override def executionContext = GenericActionBuilder.this.executionContext
+    override def executionContext = invoker.executionContext
   })
 
   /**
@@ -450,7 +461,7 @@ trait GenericActionBuilder[+R[_], A] extends HigherOrderActionFunction[Request, 
 /**
  * Provides helpers for creating `Action` values.
  */
-trait ActionBuilder[+R[_]] extends GenericActionBuilder[R, AnyContent] {
+class ActionBuilder[+R[_]](invoker: HigherOrderActionFunction[Request, R, AnyContent]) extends GenericActionBuilder[R, AnyContent](invoker) {
 
   /**
    * Constructs an `Action` with default content.
@@ -518,13 +529,6 @@ trait ActionBuilder[+R[_]] extends GenericActionBuilder[R, AnyContent] {
 
 }
 
-/**
- * Helper object to create `Action` values.
- */
-object Action extends ActionBuilder[Request] {
-  def invokeBlock(request: Request[AnyContent], block: Request[AnyContent] => Future[SimpleResult]) = block(request)
-}
-
 /* NOTE: the following are all example uses of ActionFunction, each subtly
  * different but useful in different ways. They may not all be necessary. */
 
@@ -534,7 +538,7 @@ object Action extends ActionBuilder[Request] {
  * its Action block with a parameter (of type P).
  * The critical (abstract) function is refine.
  */
-trait ActionRefiner[-R, +P] extends ActionFunction[R, P] {
+trait ActionRefiner[-R[_], +P[_], A] extends HigherOrderActionFunction[R, P, A] {
   /**
    * Determine how to process a request.  This is the main method than an ActionRefiner has to implement.
    * It can decide to immediately intercept the request and return a SimpleResult (Left), or continue processing with a new parameter of type P (Right).
@@ -542,9 +546,9 @@ trait ActionRefiner[-R, +P] extends ActionFunction[R, P] {
    * @param request the input request
    * @return Either a result or a new parameter to pass to the Action block
    */
-  protected def refine(request: R): Future[Either[SimpleResult, P]]
+  protected def refine(request: R[A]): Future[Either[SimpleResult, P[A]]]
 
-  final def invokeBlock(request: R, block: P => Future[SimpleResult]) =
+  final def invokeBlock(request: R[A], block: P[A] => Future[SimpleResult]) =
     refine(request).flatMap(_.fold(Future.successful _, block))(executionContext)
 }
 
@@ -553,16 +557,16 @@ trait ActionRefiner[-R, +P] extends ActionFunction[R, P] {
  * unconditionally transforms it to a new parameter type (P) to be passed to
  * its Action block.  The critical (abstract) function is transform.
  */
-trait ActionTransformer[-R, +P] extends ActionRefiner[R, P] {
+trait ActionTransformer[-R[_], +P[_], A] extends ActionRefiner[R, P, A] {
   /**
    * Augment or transform an existing request.  This is the main method than an ActionTransformer has to implement.
    *
    * @param request the input request
    * @return The new parameter to pass to the Action block
    */
-  protected def transform(request: R): Future[P]
+  protected def transform(request: R[A]): Future[P[A]]
 
-  final def refine(request: R) =
+  final def refine(request: R[A]) =
     transform(request).map(Right(_))(executionContext)
 }
 
@@ -572,7 +576,7 @@ trait ActionTransformer[-R, +P] extends ActionRefiner[R, P] {
  * continue its Action block with the same request.
  * The critical (abstract) function is filter.
  */
-trait ActionFilter[R] extends ActionRefiner[R, R] {
+trait ActionFilter[R[_], A] extends ActionRefiner[R, R, A] {
   /**
    * Determine whether to process a request.  This is the main method than an ActionFilter has to implement.
    * It can decide to immediately intercept the request and return a SimpleResult (Some), or continue processing (None).
@@ -580,8 +584,8 @@ trait ActionFilter[R] extends ActionRefiner[R, R] {
    * @param request the input request
    * @return An optional SimpleResult with which to abort the request
    */
-  protected def filter(request: R): Future[Option[SimpleResult]]
+  protected def filter(request: R[A]): Future[Option[SimpleResult]]
 
-  final protected def refine(request: R) =
+  final protected def refine(request: R[A]) =
     filter(request).map(_.toLeft(request))(executionContext)
 }
