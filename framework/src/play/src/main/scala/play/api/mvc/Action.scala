@@ -3,6 +3,7 @@
  */
 package play.api.mvc
 
+import play.api.libs.functional.Arrow
 import play.api.libs.iteratee._
 import play.api._
 import scala.concurrent._
@@ -343,8 +344,7 @@ object BodyParser {
  * @tparam R the type of the request on which this is invoked (input)
  * @tparam P the parameter type which blocks executed by this builder take (output)
  */
-trait ActionFunction[-R[_], +P[_]] {
-  self =>
+trait ActionFunction[-R, +P] {
 
   /**
    * Invoke the block.  This is the main method that an ActionBuilder has to implement, at this stage it can wrap it in
@@ -354,38 +354,30 @@ trait ActionFunction[-R[_], +P[_]] {
    * @param block The block of code to invoke
    * @return A future of the result
    */
-  def invokeBlock[A](request: R[A], block: P[A] => Future[SimpleResult]): Future[SimpleResult]
+  def invokeBlock(request: R, block: P => Future[SimpleResult]): Future[SimpleResult]
 
   /**
-   * Compose this ActionFunction with another, with this one applied first.
+   * Get the execution context to run the request in.  Override this if you want a custom execution context
    *
-   * @param other ActionFunction with which to compose
-   * @return The new ActionFunction
+   * @return The execution context
    */
-  def andThen[Q[_]](other: ActionFunction[P, Q]): ActionFunction[R, Q] = new ActionFunction[R, Q] {
-    def invokeBlock[A](request: R[A], block: Q[A] => Future[SimpleResult]) =
-      self.invokeBlock[A](request, other.invokeBlock[A](_, block))
-  }
-
-  /**
-   * Compose another ActionFunction with this one, with this one applied last.
-   *
-   * @param other ActionFunction with which to compose
-   * @return The new ActionFunction
-   */
-  def compose[Q[_]](other: ActionFunction[Q, R]): ActionFunction[Q, P] =
-    other.andThen(this)
-
-  def compose(other: ActionBuilder[R]): ActionBuilder[P] =
-    other.andThen(this)
+  protected def executionContext: ExecutionContext = play.api.libs.concurrent.Execution.defaultContext
 
 }
 
-/**
- * Provides helpers for creating `Action` values.
- */
-trait ActionBuilder[+R[_]] extends ActionFunction[Request, R] {
-  self =>
+object ActionFunction {
+  implicit object Arrow extends Arrow[ActionFunction] {
+    def compose[B, C, D](f: ActionFunction[C, D], g: ActionFunction[B, C]): ActionFunction[B, D] = new ActionFunction[B, D] {
+      def invokeBlock(request: B, block: D => Future[SimpleResult]): Future[SimpleResult] = {
+        g.invokeBlock(request, r => f.invokeBlock(r, block))
+      }
+    }
+  }
+}
+
+trait HigherOrderActionFunction[-R[_], +P[_], A] extends ActionFunction[R[A], P[A]]
+
+trait GenericActionBuilder[+R[_], A] extends HigherOrderActionFunction[Request, R, A] {
 
   /**
    * Constructs an `Action`.
@@ -402,12 +394,63 @@ trait ActionBuilder[+R[_]] extends ActionFunction[Request, R] {
    * @param block the action code
    * @return an action
    */
-  final def apply[A](bodyParser: BodyParser[A])(block: R[A] => Result): Action[A] = async(bodyParser) { req: R[A] =>
+  final def apply(bodyParser: BodyParser[A])(block: R[A] => Result): Action[A] = async(bodyParser) { req: R[A] =>
     block(req) match {
       case simple: SimpleResult => Future.successful(simple)
       case async: AsyncResult => async.unflatten
     }
   }
+
+  /**
+   * Constructs an `Action` that returns a future of a result.
+   *
+   * For example:
+   * {{{
+   * val hello = Action.async { request =>
+   *   WS.url(request.getQueryString("url").get).get().map { r =>
+   *     if (r.status == 200) Ok("The website is up") else NotFound("The website is down")
+   *   }
+   * }
+   * }}}
+   *
+   * @param block the action code
+   * @return an action
+   */
+  final def async(bodyParser: BodyParser[A])(block: R[A] => Future[SimpleResult]): Action[A] = composeAction(new Action[A] {
+    def parser = composeParser(bodyParser)
+    def apply(request: Request[A]) = try {
+      invokeBlock(request, block)
+    } catch {
+      // NotImplementedError is not caught by NonFatal, wrap it
+      case e: NotImplementedError => throw new RuntimeException(e)
+      // LinkageError is similarly harmless in Play Framework, since automatic reloading could easily trigger it
+      case e: LinkageError => throw new RuntimeException(e)
+    }
+    override def executionContext = GenericActionBuilder.this.executionContext
+  })
+
+  /**
+   * Compose the parser.  This allows the action builder to potentially intercept requests before they are parsed.
+   *
+   * @param bodyParser The body parser to compose
+   * @return The composed body parser
+   */
+  protected def composeParser(bodyParser: BodyParser[A]): BodyParser[A] = bodyParser
+
+  /**
+   * Compose the action with other actions.  This allows mixing in of various actions together.
+   *
+   * @param action The action to compose
+   * @return The composed action
+   */
+  protected def composeAction(action: Action[A]): Action[A] = action
+
+}
+
+/**
+ * Provides helpers for creating `Action` values.
+ */
+trait ActionBuilder[+R[_]] extends GenericActionBuilder[R, AnyContent] {
 
   /**
    * Constructs an `Action` with default content.
@@ -473,70 +516,13 @@ trait ActionBuilder[+R[_]] extends ActionFunction[Request, R] {
    */
   final def async(block: R[AnyContent] => Future[SimpleResult]): Action[AnyContent] = async(BodyParsers.parse.anyContent)(block)
 
-  /**
-   * Constructs an `Action` that returns a future of a result, with default content.
-   *
-   * For example:
-   * {{{
-   * val hello = Action.async { request =>
-   *   WS.url(request.getQueryString("url").get).get().map { r =>
-   *     if (r.status == 200) Ok("The website is up") else NotFound("The website is down")
-   *   }
-   * }
-   * }}}
-   *
-   * @param block the action code
-   * @return an action
-   */
-  final def async[A](bodyParser: BodyParser[A])(block: R[A] => Future[SimpleResult]): Action[A] = composeAction(new Action[A] {
-    def parser = composeParser(bodyParser)
-    def apply(request: Request[A]) = try {
-      invokeBlock(request, block)
-    } catch {
-      // NotImplementedError is not caught by NonFatal, wrap it
-      case e: NotImplementedError => throw new RuntimeException(e)
-      // LinkageError is similarly harmless in Play Framework, since automatic reloading could easily trigger it
-      case e: LinkageError => throw new RuntimeException(e)
-    }
-    override def executionContext = ActionBuilder.this.executionContext
-  })
-
-  /**
-   * Compose the parser.  This allows the action builder to potentially intercept requests before they are parsed.
-   *
-   * @param bodyParser The body parser to compose
-   * @return The composed body parser
-   */
-  protected def composeParser[A](bodyParser: BodyParser[A]): BodyParser[A] = bodyParser
-
-  /**
-   * Compose the action with other actions.  This allows mixing in of various actions together.
-   *
-   * @param action The action to compose
-   * @return The composed action
-   */
-  protected def composeAction[A](action: Action[A]): Action[A] = action
-
-  /**
-   * Get the execution context to run the request in.  Override this if you want a custom execution context
-   *
-   * @return The execution context
-   */
-  protected def executionContext: ExecutionContext = play.api.libs.concurrent.Execution.defaultContext
-
-  override def andThen[Q[_]](other: ActionFunction[R, Q]): ActionBuilder[Q] = new ActionBuilder[Q] {
-    def invokeBlock[A](request: Request[A], block: Q[A] => Future[SimpleResult]) =
-      self.invokeBlock[A](request, other.invokeBlock[A](_, block))
-    override protected def composeParser[A](bodyParser: BodyParser[A]): BodyParser[A] = self.composeParser(bodyParser)
-    override protected def composeAction[A](action: Action[A]): Action[A] = self.composeAction(action)
-  }
 }
 
 /**
  * Helper object to create `Action` values.
  */
 object Action extends ActionBuilder[Request] {
-  def invokeBlock[A](request: Request[A], block: (Request[A]) => Future[SimpleResult]) = block(request)
+  def invokeBlock(request: Request[AnyContent], block: Request[AnyContent] => Future[SimpleResult]) = block(request)
 }
 
 /* NOTE: the following are all example uses of ActionFunction, each subtly
@@ -548,7 +534,7 @@ object Action extends ActionBuilder[Request] {
  * its Action block with a parameter (of type P).
  * The critical (abstract) function is refine.
  */
-trait ActionRefiner[-R[_], +P[_]] extends ActionFunction[R, P] {
+trait ActionRefiner[-R, +P] extends ActionFunction[R, P] {
   /**
    * Determine how to process a request.  This is the main method than an ActionRefiner has to implement.
    * It can decide to immediately intercept the request and return a SimpleResult (Left), or continue processing with a new parameter of type P (Right).
@@ -556,10 +542,10 @@ trait ActionRefiner[-R[_], +P[_]] extends ActionFunction[R, P] {
    * @param request the input request
    * @return Either a result or a new parameter to pass to the Action block
    */
-  protected def refine[A](request: R[A]): Future[Either[SimpleResult, P[A]]]
+  protected def refine(request: R): Future[Either[SimpleResult, P]]
 
-  final def invokeBlock[A](request: R[A], block: P[A] => Future[SimpleResult]) =
-    refine(request).flatMap(_.fold(Future.successful _, block))
+  final def invokeBlock(request: R, block: P => Future[SimpleResult]) =
+    refine(request).flatMap(_.fold(Future.successful _, block))(executionContext)
 }
 
 /**
@@ -567,17 +553,17 @@ trait ActionRefiner[-R[_], +P[_]] extends ActionFunction[R, P] {
  * unconditionally transforms it to a new parameter type (P) to be passed to
  * its Action block.  The critical (abstract) function is transform.
  */
-trait ActionTransformer[-R[_], +P[_]] extends ActionRefiner[R, P] {
+trait ActionTransformer[-R, +P] extends ActionRefiner[R, P] {
   /**
    * Augment or transform an existing request.  This is the main method than an ActionTransformer has to implement.
    *
    * @param request the input request
    * @return The new parameter to pass to the Action block
    */
-  protected def transform[A](request: R[A]): Future[P[A]]
+  protected def transform(request: R): Future[P]
 
-  final def refine[A](request: R[A]) =
-    transform(request).map(Right(_))
+  final def refine(request: R) =
+    transform(request).map(Right(_))(executionContext)
 }
 
 /**
@@ -586,7 +572,7 @@ trait ActionTransformer[-R[_], +P[_]] extends ActionRefiner[R, P] {
  * continue its Action block with the same request.
  * The critical (abstract) function is filter.
  */
-trait ActionFilter[R[_]] extends ActionRefiner[R, R] {
+trait ActionFilter[R] extends ActionRefiner[R, R] {
   /**
    * Determine whether to process a request.  This is the main method than an ActionFilter has to implement.
    * It can decide to immediately intercept the request and return a SimpleResult (Some), or continue processing (None).
@@ -594,8 +580,8 @@ trait ActionFilter[R[_]] extends ActionRefiner[R, R] {
    * @param request the input request
    * @return An optional SimpleResult with which to abort the request
    */
-  protected def filter[A](request: R[A]): Future[Option[SimpleResult]]
+  protected def filter(request: R): Future[Option[SimpleResult]]
 
-  final protected def refine[A](request: R[A]) =
-    filter(request).map(_.toLeft(request))
+  final protected def refine(request: R) =
+    filter(request).map(_.toLeft(request))(executionContext)
 }
