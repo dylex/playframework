@@ -2,16 +2,20 @@
  * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
  */
 import sbt._
-import sbt.Keys._
 
 object Dependencies {
 
   // Some common dependencies here so they don't need to be declared over and over
-  val specsBuild = "org.specs2" %% "specs2" % "2.3.1"
+  val specsVersion = "2.3.7"
+  val specsBuild = Seq(
+    "org.specs2" %% "specs2-core" % specsVersion,
+    "org.specs2" %% "specs2-junit" % specsVersion,
+    "org.specs2" %% "specs2-mock" % specsVersion
+  )
   val specsSbt = specsBuild
   val scalaIoFile = "com.github.scala-incubator.io" %% "scala-io-file" % "0.4.2"
 
-  val guava = "com.google.guava" % "guava" % "15.0"
+  val guava = "com.google.guava" % "guava" % "16.0.1"
   val findBugs = "com.google.code.findbugs" % "jsr305" % "2.0.2" // Needed by guava
   val mockitoAll = "org.mockito" % "mockito-all" % "1.9.5"
 
@@ -22,9 +26,7 @@ object Dependencies {
 
     h2database,
 
-    "tyrex" % "tyrex" % "1.0.1",
-
-    specsBuild % "test")
+    "tyrex" % "tyrex" % "1.0.1") ++ specsBuild.map(_ % "test")
 
   val ebeanDeps = Seq(
     "org.avaje.ebeanorm" % "avaje-ebeanorm" % "3.2.2" exclude ("javax.persistence", "persistence-api"),
@@ -37,7 +39,7 @@ object Dependencies {
 
   val javaDeps = Seq(
 
-    "org.yaml" % "snakeyaml" % "1.12",
+    "org.yaml" % "snakeyaml" % "1.13",
     "org.hibernate" % "hibernate-validator" % "5.0.1.Final",
 
     ("org.springframework" % "spring-context" % "3.2.3.RELEASE" notTransitive ())
@@ -62,9 +64,14 @@ object Dependencies {
     guava,
     findBugs,
 
-    "javax.servlet" % "javax.servlet-api" % "3.0.1",
+    "javax.servlet" % "javax.servlet-api" % "3.0.1") ++
+    specsBuild.map(_ % "test")
 
-    specsBuild % "test")
+  val javaTestDeps = Seq(
+    "junit" % "junit" % "4.11" % "test",
+    "com.novocode" % "junit-interface" % "0.11-RC1" % "test",
+    "org.easytesting" % "fest-assert" % "1.4" % "test",
+    mockitoAll % "test")
 
   val runtime = Seq(
     "io.netty" % "netty" % "3.7.0.Final",
@@ -80,48 +87,40 @@ object Dependencies {
 
     scalaIoFile,
 
-    "com.typesafe.akka" %% "akka-actor" % "2.2.0",
-    "com.typesafe.akka" %% "akka-slf4j" % "2.2.0",
+    "com.typesafe.akka" %% "akka-actor" % "2.3.0",
+    "com.typesafe.akka" %% "akka-slf4j" % "2.3.0",
 
     "org.scala-stm" %% "scala-stm" % "0.7",
-    "commons-codec" % "commons-codec" % "1.7",
+    "commons-codec" % "commons-codec" % "1.9",
 
-    "joda-time" % "joda-time" % "2.2",
-    "org.joda" % "joda-convert" % "1.3.1",
+    "joda-time" % "joda-time" % "2.3",
+    "org.joda" % "joda-convert" % "1.5",
 
     "org.apache.commons" % "commons-lang3" % "3.1",
 
-    "com.fasterxml.jackson.core" % "jackson-core" % "2.2.2",
-    "com.fasterxml.jackson.core" % "jackson-annotations" % "2.2.2",
-    "com.fasterxml.jackson.core" % "jackson-databind" % "2.2.2",
+    "com.fasterxml.jackson.core" % "jackson-core" % "2.3.1",
+    "com.fasterxml.jackson.core" % "jackson-annotations" % "2.3.0",
+    "com.fasterxml.jackson.core" % "jackson-databind" % "2.3.0",
 
     "xerces" % "xercesImpl" % "2.11.0",
 
     "javax.transaction" % "jta" % "1.1",
 
-    specsBuild % "test",
-
-    mockitoAll % "test",
-    "com.novocode" % "junit-interface" % "0.10" % "test" exclude("junit", "junit-dep"),
-    "org.easytesting" % "fest-assert" % "1.4" % "test",
     guava % "test",
 
-    "org.scala-lang" % "scala-reflect" % BuildSettings.buildScalaVersion,
+    "org.scala-lang" % "scala-reflect" % BuildSettings.buildScalaVersion) ++
+    specsBuild.map(_ % "test") ++
+    javaTestDeps
 
-    "junit" % "junit" % "4.11" % "test")
 
   val link = Seq(
     "org.javassist" % "javassist" % "3.18.0-GA")
 
-  val routersCompilerDependencies = Seq(
-    scalaIoFile,
-    specsSbt % "test"
-  )
+  val routersCompilerDependencies = scalaIoFile +:
+    specsSbt.map(_ % "test")
 
-  val templatesCompilerDependencies = Seq(
-    scalaIoFile,
-    specsSbt % "test"
-  )
+  val templatesCompilerDependencies = scalaIoFile +:
+    specsSbt.map(_ % "test")
 
   val sbtDependencies = Seq(
     "org.scala-lang" % "scala-reflect" % BuildSettings.buildScalaVersionForSbt % "provided",
@@ -145,10 +144,8 @@ object Dependencies {
 
     "com.typesafe.sbteclipse" % "sbteclipse-plugin" % "2.4.0" extra("sbtVersion" -> BuildSettings.buildSbtVersionBinaryCompatible, "scalaVersion" -> BuildSettings.buildScalaBinaryVersionForSbt),
     "com.github.mpeltonen" % "sbt-idea" % "1.5.1" extra("sbtVersion" -> BuildSettings.buildSbtVersionBinaryCompatible, "scalaVersion" -> BuildSettings.buildScalaBinaryVersionForSbt),
-    "com.typesafe.sbt" % "sbt-native-packager" % "0.6.3" extra("sbtVersion" ->  BuildSettings.buildSbtVersionBinaryCompatible, "scalaVersion" -> BuildSettings.buildScalaBinaryVersionForSbt),
-
+    "com.typesafe.sbt" % "sbt-native-packager" % "0.6.4" extra("sbtVersion" ->  BuildSettings.buildSbtVersionBinaryCompatible, "scalaVersion" -> BuildSettings.buildScalaBinaryVersionForSbt)) ++
     specsSbt
-  )
 
   val playDocsDependencies = Seq(
     "com.typesafe.play" %% "play-doc" % "1.0.3"
@@ -160,57 +157,56 @@ object Dependencies {
     "jline" % "jline" % "2.11"
   )
 
-  val templatesDependencies = Seq(
-    scalaIoFile,
-    specsBuild % "test")
+  val templatesDependencies = scalaIoFile +:
+    specsBuild.map(_ % "test")
 
   val iterateesDependencies = Seq(
     "org.scala-stm" %% "scala-stm" % "0.7",
-    "com.typesafe" % "config" % "1.0.2",
-    specsBuild % "test")
+    "com.typesafe" % "config" % "1.0.2") ++
+    specsBuild.map(_ % "test")
 
   val jsonDependencies = Seq(
     "joda-time" % "joda-time" % "2.2",
     "org.joda" % "joda-convert" % "1.3.1",
-    "com.fasterxml.jackson.core" % "jackson-annotations" % "2.2.2",
-    "com.fasterxml.jackson.core" % "jackson-core" % "2.2.2",
-    "com.fasterxml.jackson.core" % "jackson-databind" % "2.2.2",
-    "org.scala-lang" % "scala-reflect" % BuildSettings.buildScalaVersion,
-    specsBuild % "test")
+    "com.fasterxml.jackson.core" % "jackson-annotations" % "2.3.0",
+    "com.fasterxml.jackson.core" % "jackson-core" % "2.3.1",
+    "com.fasterxml.jackson.core" % "jackson-databind" % "2.3.0",
+    "org.scala-lang" % "scala-reflect" % BuildSettings.buildScalaVersion) ++
+    specsBuild.map(_ % "test")
 
-  val testDependencies = Seq(
-    "junit" % "junit" % "4.11",
-    specsBuild,
+  val scalacheckDependencies = Seq(
+    "org.specs2" %% "specs2-scalacheck" % specsVersion % "test",
+    "org.scalacheck" %% "scalacheck" % "1.11.3" % "test"
+  )
+
+  val testDependencies = Seq("junit" % "junit" % "4.11") ++ specsBuild ++ Seq(
     "com.novocode" % "junit-interface" % "0.10" exclude("junit", "junit-dep"),
     guava,
     findBugs,
-    ("org.fluentlenium" % "fluentlenium-festassert" % "0.9.0")
+    ("org.fluentlenium" % "fluentlenium-festassert" % "0.9.2")
       .exclude("org.jboss.netty", "netty")
   )
 
-  val integrationTestDependencies = Seq(
+  val integrationTestDependencies = scalacheckDependencies ++ Seq(
     "org.databene" % "contiperf" % "2.2.0" % "test"
   )
 
-  val playCacheDeps = Seq(
-    "net.sf.ehcache" % "ehcache-core" % "2.6.6",
-    specsBuild % "test"
-  )
+  val playCacheDeps = "net.sf.ehcache" % "ehcache-core" % "2.6.6" +: 
+    specsBuild.map(_ % "test")
 
   val playWsDeps = Seq(
     guava,
-    ("com.ning" % "async-http-client" % "1.7.21" notTransitive ())
+    ("com.ning" % "async-http-client" % "1.7.23" notTransitive ())
       .exclude("org.jboss.netty", "netty"),
     "oauth.signpost" % "signpost-core" % "1.2.1.2",
-    "oauth.signpost" % "signpost-commonshttp4" % "1.2.1.2",
-
-    specsBuild % "test",
+    "oauth.signpost" % "signpost-commonshttp4" % "1.2.1.2") ++
+    specsBuild.map(_ % "test") :+
     mockitoAll % "test"
-  )
 
-  val anormDependencies = Seq(
-    specsBuild % "test",
-    h2database % "test"
+  val anormDependencies = specsBuild.map(_ % "test") ++ Seq(
+    h2database % "test",
+    "org.eu.acolyte" %% "jdbc-scala" % "1.0.15" % "test",
+    "com.chuusai" % "shapeless_2.10.2" % "2.0.0-M1" % "test"
   )
 
 }

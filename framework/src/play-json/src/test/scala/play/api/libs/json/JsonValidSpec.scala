@@ -41,6 +41,13 @@ object JsonValidSpec extends Specification {
       JsNumber(5.123).validate[BigDecimal] must equalTo(JsSuccess(BigDecimal(5.123)))
     }
 
+    "return JsResult with correct values for isSuccess and isError" in {
+      JsString("s").validate[String].isSuccess must beTrue
+      JsString("s").validate[String].isError must beFalse
+      JsString("s").validate[Long].isSuccess must beFalse
+      JsString("s").validate[Long].isError must beTrue
+    }
+
     "validate JsObject to Map" in {
       Json.obj("key1" -> "value1", "key2" -> "value2").validate[Map[String, String]] must equalTo(JsSuccess(Map("key1" -> "value1", "key2" -> "value2")))
       Json.obj("key1" -> 5, "key2" -> 3).validate[Map[String, Int]] must equalTo(JsSuccess(Map("key1" -> 5, "key2" -> 3)))
@@ -130,6 +137,24 @@ object JsonValidSpec extends Specification {
         )
       )
       js.validate[java.util.Date](Reads.IsoDateReads) must beEqualTo(JsSuccess(c.getTime))*/
+    }
+
+    "validate UUID" in {
+      "validate correct UUIDs" in {
+        val uuid = java.util.UUID.randomUUID()
+        Json.toJson[java.util.UUID](uuid).validate[java.util.UUID] must beEqualTo(JsSuccess(uuid))
+      }
+
+      "reject malformed UUIDs" in {
+        JsString("bogus string").validate[java.util.UUID].recoverTotal {
+          e => "error"
+        } must beEqualTo("error")
+      }
+      "reject well-formed but incorrect UUIDS in strict mode" in {
+        JsString("0-0-0-0-0").validate[java.util.UUID](Reads.uuidReader(true)).recoverTotal {
+          e => "error"
+        } must beEqualTo("error")
+      }
     }
 
     "Can reads with nullable" in {

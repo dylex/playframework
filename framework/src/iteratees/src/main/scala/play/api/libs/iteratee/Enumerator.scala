@@ -5,7 +5,7 @@ package play.api.libs.iteratee
 
 import play.api.libs.iteratee.Execution.Implicits.{ defaultExecutionContext => dec }
 import play.api.libs.iteratee.internal.{ eagerFuture, executeFuture }
-import scala.concurrent.{ ExecutionContext, Future, Promise }
+import scala.concurrent.{ ExecutionContext, Future, Promise, blocking }
 import scala.util.{ Try, Success, Failure }
 import scala.language.reflectiveCalls
 
@@ -354,14 +354,6 @@ object Enumerator {
 
   }
 
-  trait Pushee[E] {
-
-    def push(item: E): Boolean
-
-    def close()
-
-  }
-
   /**
    * Like [[play.api.libs.iteratee.Enumerator.unfold]], but allows the unfolding to be done asynchronously.
    *
@@ -564,8 +556,10 @@ object Enumerator {
     implicit val pec = ec.prepare()
     generateM({
       val buffer = new Array[Byte](chunkSize)
-      val chunk = input.read(buffer) match {
+      val bytesRead = blocking { input.read(buffer) }
+      val chunk = bytesRead match {
         case -1 => None
+        case `chunkSize` => Some(buffer)
         case read =>
           val input = new Array[Byte](read)
           System.arraycopy(buffer, 0, input, 0, read)

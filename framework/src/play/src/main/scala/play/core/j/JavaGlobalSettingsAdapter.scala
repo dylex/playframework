@@ -8,6 +8,7 @@ import play.api.mvc._
 import java.io.File
 import scala.concurrent.Future
 import play.api.libs.iteratee._
+import scala.util.control.NonFatal
 
 /** Adapter that holds the Java `GlobalSettings` and acts as a Scala `GlobalSettings` for the framework. */
 class JavaGlobalSettingsAdapter(val underlying: play.GlobalSettings) extends GlobalSettings {
@@ -51,7 +52,8 @@ class JavaGlobalSettingsAdapter(val underlying: play.GlobalSettings) extends Glo
   }
 
   override def onLoadConfig(config: Configuration, path: File, classloader: ClassLoader, mode: Mode.Mode) = {
-    Option(underlying.onLoadConfig(new play.Configuration(config), path, classloader))
+    import JavaModeConverter.asJavaMode
+    Option(underlying.onLoadConfig(new play.Configuration(config), path, classloader, mode))
       .map(_.getWrappedConfiguration).getOrElse(super.onLoadConfig(config, path, classloader, mode))
   }
 
@@ -59,7 +61,7 @@ class JavaGlobalSettingsAdapter(val underlying: play.GlobalSettings) extends Glo
     try {
       Filters(super.doFilter(a), underlying.filters.map(_.newInstance: play.api.mvc.EssentialFilter): _*)
     } catch {
-      case e: Throwable => {
+      case NonFatal(e) => {
         import play.api.libs.iteratee.Execution.Implicits.trampoline
         EssentialAction(req => Iteratee.flatten(onError(req, e).map(result => Done(result, Input.Empty))))
       }

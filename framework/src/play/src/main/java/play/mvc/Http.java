@@ -315,6 +315,8 @@ public class Http {
 
         /**
          * Retrieves a single header.
+         *
+         * @param headerName The name of the header (case-insensitive).
          */
         public String getHeader(String headerName) {
             String[] headers = null;
@@ -328,6 +330,15 @@ public class Http {
                 return null;
             }
             return headers[0];
+        }
+
+        /**
+         * Checks if the request has the header.
+         *
+         * @param headerName The name of the header (case-insensitive).
+         */
+        public boolean hasHeader(String headerName){
+            return getHeader(headerName) != null;
         }
 
     }
@@ -569,7 +580,7 @@ public class Http {
         }
 
         /**
-         * Set a new transient cookie with path “/”<br />
+         * Set a new transient cookie with path "/"<br>
          * For example:
          * <pre>
          * response().setCookie("theme", "blue");
@@ -582,7 +593,7 @@ public class Http {
         }
 
         /**
-         * Set a new cookie with path “/”
+         * Set a new cookie with path "/"
          * @param name Cookie name.  Must not be null.
          * @param value Cookie value.
          * @param maxAge Cookie duration (null for a transient cookie and 0 or less for a cookie that expires now).
@@ -629,7 +640,7 @@ public class Http {
         }
 
         /**
-         * Discard cookies along this result<br />
+         * Discard cookies along this result<br>
          * For example:
          * <pre>
          * response().discardCookies("theme");
@@ -658,7 +669,7 @@ public class Http {
         }
 
         /**
-         * Discard a cookie on the give path with no domain and not that's secure
+         * Discard a cookie on the given path with no domain and not that's secure
          *
          * @param name The name of the cookie to discard.  Must not be null.
          * @param path The path of the cookie te discard, may be null

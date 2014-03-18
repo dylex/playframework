@@ -280,7 +280,7 @@ case class SimpleResult(header: ResponseHeader, body: Enumerator[Array[Byte]],
    * @param headers the headers to add to this result.
    * @return the new result
    */
-  def withHeaders(headers: (String, String)*) = {
+  def withHeaders(headers: (String, String)*): SimpleResult = {
     copy(header = header.copy(headers = header.headers ++ headers))
   }
 
@@ -397,6 +397,40 @@ case class SimpleResult(header: ResponseHeader, body: Enumerator[Array[Byte]],
    * @return the new result
    */
   def as(contentType: String): SimpleResult = withHeaders(CONTENT_TYPE -> contentType)
+
+  /**
+   * @param request Current request
+   * @return The session carried by this result. Reads the request’s session if this result does not modify the session.
+   */
+  def session(implicit request: RequestHeader): Session =
+    Cookies(header.headers.get(SET_COOKIE)).get(Session.COOKIE_NAME) match {
+      case Some(cookie) => Session.decodeFromCookie(Some(cookie))
+      case None => request.session
+    }
+
+  /**
+   * Example:
+   * {{{
+   *   Ok.addingToSession("foo" -> "bar").addingToSession("baz" -> "bah")
+   * }}}
+   * @param values (key -> value) pairs to add to this result’s session
+   * @param request Current request
+   * @return A copy of this result with `values` added to its session scope.
+   */
+  def addingToSession(values: (String, String)*)(implicit request: RequestHeader): SimpleResult =
+    withSession(new Session(session.data ++ values.toMap))
+
+  /**
+   * Example:
+   * {{{
+   *   Ok.removingFromSession("foo")
+   * }}}
+   * @param keys Keys to remove from session
+   * @param request Current request
+   * @return A copy of this result with `keys` removed from its session scope.
+   */
+  def removingFromSession(keys: String*)(implicit request: RequestHeader): SimpleResult =
+    withSession(new Session(session.data -- keys))
 
   override def toString = {
     "SimpleResult(" + header + ")"
@@ -803,10 +837,16 @@ trait Results {
     // adds the last chunk.
     new Enumeratee[Array[Byte], Array[Byte]] {
       def applyOn[A](inner: Iteratee[Array[Byte], A]) = {
-        // Our inner iteratee will be passed through the chunking enumeratee, and also we don't want to feed EOF to
-        // it yet, instead we want to get it as the result, so that we can then feed the last chunk into it.  We use
-        // the passAlong enumeratee to achieve this.
-        val chunkedInner: Iteratee[Array[Byte], Iteratee[Array[Byte], A]] = formatChunks ><> Enumeratee.passAlong &> inner
+
+        val chunkedInner: Iteratee[Array[Byte], Iteratee[Array[Byte], A]] =
+          // First filter out empty chunks - an empty chunk signifies end of stream in chunked transfer encoding
+          Enumeratee.filterNot[Array[Byte]](_.isEmpty) ><>
+            // Apply the chunked encoding
+            formatChunks ><>
+            // Don't feed EOF into the iteratee - so we can feed the last chunk ourselves later
+            Enumeratee.passAlong &>
+            // And apply the inner iteratee
+            inner
 
         trailers match {
           case Some(trailersIteratee) => {

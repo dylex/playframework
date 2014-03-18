@@ -9,7 +9,7 @@ import play.mvc.Content;
 import play.libs.Json;
 
 /**
- * The JSONP Content renders a JavaScript call of a JSON object.<br />
+ * The JSONP Content renders a JavaScript call of a JSON object.<br>
  * Example of use, provided the following route definition:
  * <pre>
  *   GET  /my-service        Application.myService(callback: String)
@@ -25,7 +25,7 @@ import play.libs.Json;
  * <pre>
  *   GET  /my-service?callback=foo
  * </pre>
- * The response will have content type “text/javascript” and will look like the following:
+ * The response will have content type "text/javascript" and will look like the following:
  * <pre>
  *   foo({...});
  * </pre>

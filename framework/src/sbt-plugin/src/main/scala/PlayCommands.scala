@@ -12,6 +12,10 @@ import Keys._
 import java.lang.{ ProcessBuilder => JProcessBuilder }
 import sbt.complete.Parsers._
 
+import scala.util.control.NonFatal
+import sbt.inc.{ Analysis, Stamp, Exists, Hash, LastModified }
+import sbt.compiler.AggressiveCompile
+
 trait PlayCommands extends PlayAssetsCompiler with PlayEclipse with PlayInternalKeys {
   this: PlayReloader =>
 
@@ -91,7 +95,7 @@ trait PlayCommands extends PlayAssetsCompiler with PlayEclipse with PlayInternal
 
   // ----- Post compile (need to be refactored and fully configurable)
 
-  def PostCompile(scope: Configuration) = (sourceDirectory in scope, dependencyClasspath in scope, compile in scope, javaSource in scope, sourceManaged in scope, classDirectory in scope, cacheDirectory in scope) map { (src, deps, analysis, javaSrc, srcManaged, classes, cacheDir) =>
+  def PostCompile(scope: Configuration) = (sourceDirectory in scope, dependencyClasspath in scope, compile in scope, javaSource in scope, sourceManaged in scope, classDirectory in scope, cacheDirectory in scope, compileInputs in compile in scope) map { (src, deps, analysis, javaSrc, srcManaged, classes, cacheDir, inputs) =>
 
     val classpath = (deps.map(_.data.getAbsolutePath).toArray :+ classes.getAbsolutePath).mkString(java.io.File.pathSeparator)
 
@@ -111,14 +115,21 @@ trait PlayCommands extends PlayAssetsCompiler with PlayEclipse with PlayInternal
         Nil
     }
 
-    javaClasses.foreach(play.core.enhancers.PropertiesEnhancer.generateAccessors(classpath, _))
-    javaClasses.foreach(play.core.enhancers.PropertiesEnhancer.rewriteAccess(classpath, _))
-    templateClasses.foreach(play.core.enhancers.PropertiesEnhancer.rewriteAccess(classpath, _))
+    import play.core.enhancers.PropertiesEnhancer
+
+    val javaClassesWithGeneratedAccessors = javaClasses.filter(PropertiesEnhancer.generateAccessors(classpath, _))
+    val javaClassesWithAccessorsRewritten = javaClasses.filter(PropertiesEnhancer.rewriteAccess(classpath, _))
+    val enhancedTemplateClasses = templateClasses.filter(PropertiesEnhancer.rewriteAccess(classpath, _))
+
+    val enhancedClasses = (javaClassesWithGeneratedAccessors ++ javaClassesWithAccessorsRewritten ++
+      enhancedTemplateClasses).distinct
 
     IO.write(timestampFile, System.currentTimeMillis.toString)
 
+    val ebeanEnhancement = classpath.contains("play-java-ebean")
+
     // EBean
-    if (classpath.contains("play-java-ebean")) {
+    if (ebeanEnhancement) {
 
       val originalContextClassLoader = Thread.currentThread.getContextClassLoader
 
@@ -153,7 +164,7 @@ trait PlayCommands extends PlayAssetsCompiler with PlayEclipse with PlayInternal
         try {
           ft.process(models)
         } catch {
-          case _: Throwable =>
+          case NonFatal(_) =>
         }
 
       } finally {
@@ -161,6 +172,7 @@ trait PlayCommands extends PlayAssetsCompiler with PlayEclipse with PlayInternal
       }
     }
     // Copy managed classes - only needed in Compile scope
+    // This is done to ease integration with Eclipse, but it's doubtful as to how effective it is.
     if (scope.name.toLowerCase == "compile") {
       val managedClassesDirectory = classes.getParentFile / (classes.getName + "_managed")
 
@@ -174,7 +186,55 @@ trait PlayCommands extends PlayAssetsCompiler with PlayEclipse with PlayInternal
       // Remove deleted class files
       (managedClassesDirectory ** "*.class").get.filterNot(managedSet.contains(_)).foreach(_.delete())
     }
-    analysis
+
+    // If ebean enhancement was done, then it's possible that any of the java classes were enhanced, we don't know
+    // which, otherwise it's just the enhanced classes that we did accessor generation/rewriting for
+    val possiblyEnhancedClasses = if (ebeanEnhancement) {
+      javaClasses ++ enhancedTemplateClasses
+    } else {
+      enhancedClasses
+    }
+
+    if (!possiblyEnhancedClasses.isEmpty) {
+      /**
+       * Updates stamp of product (class file) by preserving the type of a passed stamp.
+       * This way any stamp incremental compiler chooses to use to mark class files will
+       * be supported.
+       */
+      def updateStampForClassFile(classFile: File, stamp: Stamp): Stamp = stamp match {
+        case _: Exists => Stamp.exists(classFile)
+        case _: LastModified => Stamp.lastModified(classFile)
+        case _: Hash => Stamp.hash(classFile)
+      }
+      // Since we may have modified some of the products of the incremental compiler, that is, the compiled template
+      // classes and compiled Java sources, we need to update their timestamps in the incremental compiler, otherwise
+      // the incremental compiler will see that they've changed since it last compiled them, and recompile them.
+      val updatedAnalysis = analysis.copy(stamps = possiblyEnhancedClasses.foldLeft(analysis.stamps) { (stamps, classFile) =>
+        val existingStamp = stamps.product(classFile)
+        if (existingStamp == Stamp.notPresent) {
+          throw new java.io.IOException("Tried to update a stamp for class file that is not recorded as "
+            + s"product of incremental compiler: $classFile")
+        }
+        stamps.markProduct(classFile, updateStampForClassFile(classFile, existingStamp))
+      })
+
+      // Need to persist the updated analysis.
+      val agg = new AggressiveCompile(inputs.incSetup.cacheFile)
+      // Load the old one. We do this so that we can get a copy of CompileSetup, which is the cache compiler
+      // configuration used to determine when everything should be invalidated. We could calculate it ourselves, but
+      // that would by a heck of a lot of fragile code due to the vast number of things we would have to depend on.
+      // Reading it out of the existing file is good enough.
+      val existing: Option[(Analysis, CompileSetup)] = agg.store.get()
+      // Since we've just done a compile before this task, this should never return None, so don't worry about what to
+      // do when it returns None.
+      existing.foreach {
+        case (_, compileSetup) => agg.store.set(updatedAnalysis, compileSetup)
+      }
+
+      updatedAnalysis
+    } else {
+      analysis
+    }
   }
 
   // ----- Play prompt

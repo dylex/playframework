@@ -7,7 +7,7 @@ Play includes a simple data access layer called Anorm that uses plain SQL to int
 
 > In the following documentation, we will use the [MySQL world sample database](http://dev.mysql.com/doc/index-other.html). 
 > 
-> If you want to enable it for your application, follow the MySQL website instructions, and configure it as  explained [[on the Scala database page | ScalaDatabase]].
+> If you want to enable it for your application, follow the MySQL website instructions, and configure it as explained [[on the Scala database page | ScalaDatabase]].
 
 ## Overview
 
@@ -46,7 +46,7 @@ Writing SQL queries yourself can be tedious for a simple ‘Hello World’ appli
 You will need to add Anorm and jdbc plugin to your dependencies : 
 
 ```scala
-val appDependencies = Seq(
+libraryDependencies ++= Seq(
   jdbc,
   anorm
 )
@@ -78,8 +78,9 @@ val result: Int = SQL("delete from City where id = 99").executeUpdate()
 If you are inserting data that has an auto-generated `Long` primary key, you can call `executeInsert()`. If you have more than one generated key, or it is not a Long, `executeInsert` can be passed a `ResultSetParser` to return the correct key.
 
 ```scala
-val id: Option[Long] = SQL("insert into City(name, country) values ({name}, {country})")
-              .on('name -> "Cambridge", 'country -> "New Zealand").executeInsert()
+val id: Option[Long] = 
+  SQL("insert into City(name, country) values ({name}, {country})")
+  .on('name -> "Cambridge", 'country -> "New Zealand").executeInsert()
 ```
 Since Scala supports multi-line strings, feel free to use them for complex SQL statements:
 
@@ -104,6 +105,146 @@ SQL(
   """
 ).on("countryCode" -> "FRA")
 ```
+
+In case several columns are found with same name in query result, for example columns named `code` in both `Country` and `CountryLanguage` tables, there can be ambiguity. By default a mapping like following one will use the last column:
+
+```scala
+import anorm.{ SQL, SqlParser }
+
+val code: String = SQL(
+  """
+    select * from Country c 
+    join CountryLanguage l on l.CountryCode = c.Code 
+    where c.code = {countryCode};
+  """)
+  .on("countryCode" -> "FRA").as(SqlParser.str("code").single)
+```
+
+If `Country.Code` is 'First' and `CountryLanguage` is 'Second', then in previous example `code` value will be 'Second'. Ambiguity can be resolved using qualified column name, with table name:
+
+```scala
+import anorm.{ SQL, SqlParser }
+
+val code: String = SQL(
+  """
+    select * from Country c 
+    join CountryLanguage l on l.CountryCode = c.Code 
+    where c.code = {countryCode};
+  """)
+  .on("countryCode" -> "FRA").as(SqlParser.str("Country.code").single)
+// code == "First"
+```
+
+Columns can also be specified by position, rather than name:
+
+```scala
+// Parsing column by name or position
+val parser = 
+  SqlParser(str("name") ~ float(3) /* third column as float */ map {
+    case name ~ f => (name -> f)
+  }
+
+val product: (String, Float) = SQL("SELECT * FROM prod WHERE id = {id}").
+  on('id -> "p").as(parser.single)
+```
+
+### Edge cases
+
+Passing anything different from string or symbol as parameter name is now deprecated. For backward compatibility, you can activate `anorm.features.parameterWithUntypedName`.
+
+```scala
+import anorm.features.parameterWithUntypedName // activate
+
+val untyped: Any = "name" // deprecated
+SQL("SELECT * FROM Country WHERE {p}").on(untyped -> "val")
+```
+
+Type of parameter value should be visible, to be properly set on SQL statement.
+Using value as `Any`, explicitly or due to erasure, leads to compilation error `No implicit view available from Any => anorm.ParameterValue`.
+
+```scala
+// Wrong #1
+val p: Any = "strAsAny"
+SQL("SELECT * FROM test WHERE id={id}").
+  on('id -> p) // Erroneous - No conversion Any => ParameterValue
+
+// Right #1
+val p = "strAsString"
+SQL("SELECT * FROM test WHERE id={id}").on('id -> p)
+
+// Wrong #2
+val ps = Seq("a", "b", 3) // inferred as Seq[Any]
+SQL("SELECT * FROM test WHERE (a={a} AND b={b}) OR c={c}").
+  on('a -> ps(0), // ps(0) - No conversion Any => ParameterValue
+    'b -> ps(1), 
+    'c -> ps(2))
+
+// Right #2
+val ps = Seq[anorm.ParameterValue]("a", "b", 3) // Seq[ParameterValue]
+SQL("SELECT * FROM test WHERE (a={a} AND b={b}) OR c={c}").
+  on('a -> ps(0), 'b -> ps(1), 'c -> ps(2))
+
+// Wrong #3
+val ts = Seq( // Seq[(String -> Any)] due to _2
+  "a" -> "1", "b" -> "2", "c" -> 3)
+
+val nps: Seq[NamedParameter] = ts map { t => 
+  val p: NamedParameter = t; p
+  // Erroneous - no conversion (String,Any) => NamedParameter
+}
+
+SQL("SELECT * FROM test WHERE (a={a} AND b={b}) OR c={c}").on(nps :_*) 
+
+// Right #3
+val nps = Seq[NamedParameter]( // Tuples as NamedParameter before Any
+  "a" -> "1", "b" -> "2", "c" -> 3)
+SQL("SELECT * FROM test WHERE (a={a} AND b={b}) OR c={c}").
+  on(nps: _*) // Fail - no conversion (String,Any) => NamedParameter
+```
+
+For backward compatibility, you can activate such unsafe parameter conversion, 
+accepting untyped `Any` value, with `anorm.features.anyToStatement`.
+
+```scala
+import anorm.features.anyToStatement
+
+val d = new java.util.Date()
+val params: Seq[NamedParameter] = Seq("mod" -> d, "id" -> "idv")
+// Values as Any as heterogenous
+
+SQL("UPDATE item SET last_modified = {mod} WHERE id = {id}").on(params:_*)
+```
+
+It's not recommanded because moreover hiding implicit resolution issues, as untyped it could lead to runtime conversion error, with values are passed on statement using `setObject`.
+In previous example, `java.util.Date` is accepted as parameter but would with most databases raise error (as it's not valid JDBC type).
+
+### SQL queries using String Interpolation
+
+Since Scala 2.10 supports custom String Interpolation there is also a 1-step alternative to `SQL(queryString).on(params)` seen before. You can abbreviate the code as: 
+
+```scala
+val name = "Cambridge"
+val country = "New Zealand"
+
+SQL"insert into City(name, country) values ($name, $country)")
+```
+
+It also supports multi-line string and inline expresions:
+
+```scala
+val lang = "French"
+val population = 10000000
+val margin = 500000
+
+val code: String = SQL"""
+  select * from Country c 
+    join CountryLanguage l on l.CountryCode = c.Code 
+    where l.Language = $lang and c.Population >= ${population - margin}
+    order by c.Population desc limit 1"""
+  .as(SqlParser.str("Country.code").single)
+```
+
+This feature tries to make faster, more concise and easier to read the way to retrieve data in Anorm. Please, feel free to use it wherever you see a combination of `SQL().on()` functions (or even an only `SQL()` without parameters).
 
 ## Retrieving data using the Stream API
 
@@ -151,6 +292,70 @@ val countries = SQL("Select name,population from Country")().collect {
 
 Note that since `collect(…)` ignores the cases where the partial function isn’t defined, it allows your code to safely ignore rows that you don’t expect.
 
+## Using for-comprehension
+
+Row parser can be defined as for-comprehension, working with SQL result type. It can be useful when working with lot of column, possibly to work around case class limit.
+
+```scala
+import anorm.SqlParser.{ str, int }
+
+val parser = for {
+  a <- str("colA")
+  b <- int("colB")
+} yield (a -> b)
+
+val parsed: (String, Int) = SELECT("SELECT * FROM Test").as(parser.single)
+```
+
+## Using multi-value parameter
+
+Anorm parameter can be multi-value, like a sequence of string.
+In such case, values will be prepared to be passed to JDBC.
+
+```scala
+// With default formatting (", " as separator)
+SQL("SELECT * FROM Test WHERE cat IN ({categories})").
+  on('categories -> Seq("a", "b", "c")
+// -> SELECT * FROM Test WHERE cat IN ('a', 'b', 'c')
+
+// With custom formatting
+import anorm.SeqParameter
+SQL("SELECT * FROM Test t WHERE {categories}").
+  on('categories -> SeqParameter(
+    values = Seq("a", "b", "c"), separator = " OR ", 
+    pre = "EXISTS (SELECT NULL FROM j WHERE t.id=j.id AND name=",
+    post = ")"))
+/* ->
+SELECT * FROM Test t WHERE 
+EXISTS (SELECT NULL FROM j WHERE t.id=j.id AND name='a') 
+OR EXISTS (SELECT NULL FROM j WHERE t.id=j.id AND name='b') 
+OR EXISTS (SELECT NULL FROM j WHERE t.id=j.id AND name='c')
+*/
+```
+
+## Retrieving data along with execution context
+
+Moreover data, query execution involves context information like SQL warnings that may be raised (and may be fatal or not), especially when working with stored SQL procedure.
+
+Way to get context information along with query data is to use `executeQuery()`:
+
+```scala
+import anorm.SqlQueryResult
+
+val res: SqlQueryResult = SQL("EXEC stored_proc {code}").
+  on('code -> code).executeQuery()
+
+// Check execution context (there warnings) before going on
+val str: Option[String] =
+  res.statementWarning match {
+    case Some(warning) =>
+      warning.printStackTrace()
+      None
+
+    case _ => res.as(scalar[String].singleOpt) // go on row parsing
+  }
+```
+
 ## Special data types
 
 ### Clobs
@@ -177,7 +382,47 @@ SQL("Select name,image from Country")().map {
 
 ### Database interoperability
 
-Note that different databases will return different data types in the Row. For instance, an SQL 'smallint' is returned as a Short by org.h2.Driver and an Integer by org.postgresql.Driver. A solution to this is to simply write separate case statements for each database (i.e. one for development and one for production).
+Note that different databases will return different data types in the Row. For instance, an SQL 'smallint' is returned as a Short by `org.h2.Driver` and an Integer by `org.postgresql.Driver`. A solution to this is to simply write separate case statements for each database (i.e. one for development and one for production).
+
+Anorm provides common mappings for Scala types from JDBC datatypes.
+
+When needed, it's possible to customize such mappings, for example if underlying DB doesn't support boolean datatype and returns integer instead. To do so, you have to provide a new implicit conversion for `Column[T]`, where `T` is the target Scala type:
+
+```scala
+import anorm.Column
+
+// Custom conversion from JDBC column to Boolean
+implicit def columnToBoolean: Column[Boolean] = 
+  Column.nonNull { (value, meta) =>
+    val MetaDataItem(qualified, nullable, clazz) = meta
+    value match {
+      case bool: Boolean => Right(bool) // Provided-default case
+      case bit: Int      => Right(bit == 1) // Custom conversion
+      case _             => Left(TypeDoesNotMatch(s"Cannot convert $value: ${value.asInstanceOf[AnyRef].getClass} to Boolean for column $qualified"))
+    }
+  }
+```
+
+Custom or specific DB conversion for parameter can also be provided:
+
+```
+import java.sql.PreparedStatement
+import anorm.ToStatement
+
+// Custom conversion to statement for type T
+implicit def customToStatement: ToStatement[T] = new ToStatement[T] {
+  def set(statement: PreparedStatement, i: Int, value: T): Unit =
+    ??? // Sets |value| on |statement|
+}
+```
+
+For DB specific parameter, it can be explicitly passed as opaque value.
+In this case at your own risk, `setObject` will be used on statement.
+
+```scala
+val anyVal: Any = myVal
+SQL("UPDATE t SET v = {opaque}").on('opaque -> anorm.Object(anyVal))
+```
 
 ## Dealing with Nullable columns
 
@@ -234,7 +479,8 @@ val rsParser = scalar[Long].single
 So this parser will parse a result set to return a `Long`. It is useful to parse to result produced by a simple SQL `select count` query:
 
 ```scala
-val count: Long = SQL("select count(*) from Country").as(scalar[Long].single)
+val count: Long = 
+  SQL("select count(*) from Country").as(scalar[Long].single)
 ```
 
 
@@ -243,7 +489,9 @@ val count: Long = SQL("select count(*) from Country").as(scalar[Long].single)
 Let's say you want to retrieve the country_id from the country name, but the query might return null. We'll use the singleOpt parser :
 
 ```scala
-val countryId: Option[Long] = SQL("select country_id from Country C where C.country='France'").as(scalar[Long].singleOpt)
+val countryId: Option[Long] = 
+  SQL("select country_id from Country C where C.country='France'")
+  .as(scalar[Long].singleOpt)
 ```
 
 ### Getting a more complex result
@@ -253,7 +501,7 @@ Let’s write a more complicated parser:
 `str("name") ~ int("population")`, will create a `RowParser` able to parse a row containing a String `name` column and an Integer `population` column. Then we can create a `ResultSetParser` that will parse as many rows of this kind as it can, using `*`: 
 
 ```scala
-val populations:List[String~Int] = {
+val populations: List[String~Int] = {
   SQL("select * from Country").as( str("name") ~ int("population") * ) 
 }
 ```
@@ -263,28 +511,28 @@ As you see, this query’s result type is `List[String~Int]` - a list of country
 You can also rewrite the same code as:
 
 ```scala
-val result:List[String~Int] = {
-  SQL("select * from Country").as(get[String]("name")~get[Int]("population")*) 
+val result: List[String~Int] = {
+  SQL("select * from Country")
+  .as(get[String]("name") ~ get[Int]("population") *)
 }
 ```
 
 Now what about the `String~Int` type? This is an **Anorm** type that is not really convenient to use outside of your database access code. You would rather have a simple tuple `(String, Int)` instead. You can use the `map` function on a `RowParser` to transform its result to a more convenient type:
 
 ```scala
-str("name") ~ int("population") map { case n~p => (n,p) }
+val parser = str("name") ~ int("population") map { case n~p => (n,p) }
 ```
 
 > **Note:** We created a tuple `(String,Int)` here, but there is nothing stopping you from transforming the `RowParser` result to any other type, such as a custom case class.
 
-Now, because transforming `A~B~C` types to `(A,B,C)` is a common task, we provide a `flatten` function that does exactly that. So you finally write:
+Now, because transforming `A ~ B ~ C` types to `(A, B, C)` is a common task, we provide a `flatten` function that does exactly that. So you finally write:
 
 ```scala
-val result:List[(String,Int)] = {
-  SQL("select * from Country").as(
-    str("name") ~ int("population") map(flatten) *
-  ) 
-}
+val result: List[(String, Int)] = 
+  SQL("select * from Country").as(parser.*)
 ```
+
+If list should not be empty, `parser.+` can be used instead of `parser.*`.
 
 ### A more complicated example
 

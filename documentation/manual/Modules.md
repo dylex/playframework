@@ -11,28 +11,22 @@
 * **Documentation:** <https://github.com/teamon/play-airbrake/blob/master/README.md>
 * **Short description:** Send exception notifications to airbrake.io
 
-## Amazon STS module (Scala)
-
-* **Website:** <https://github.com/Rhinofly/play-libraries/tree/master/apis/sts>
-* **Documentation:** <https://github.com/Rhinofly/play-libraries/tree/master/apis/sts/README.md>
-* **Short description:** STS (Security Token Service) API wrapper for Play
-
 ## Amazon SES module (Scala)
 
-* **Website:** <https://github.com/Rhinofly/play-libraries/tree/master/apis/ses>
-* **Documentation:** <https://github.com/Rhinofly/play-libraries/tree/master/apis/ses/README.md>
+* **Website:** <https://github.com/Rhinofly/play-mailer>
+* **Documentation:** <https://github.com/Rhinofly/play-mailer/blob/master/README.md>
 * **Short description:** SES (Simple Email Service) API wrapper for Play
 
 ## Amazon S3 module (Scala)
 
-* **Website:** <https://github.com/Rhinofly/play-libraries/tree/master/apis/s3>
-* **Documentation:** <https://github.com/Rhinofly/play-libraries/tree/master/apis/s3/README.md>
+* **Website:** <https://github.com/Rhinofly/play-s3>
+* **Documentation:** <https://github.com/Rhinofly/play-s3/blob/master/README.md>
 * **Short description:** S3 (Simple Storage Service) API wrapper for Play
 
 ## Amf module (Scala)
 
-* **Website:** <https://github.com/Rhinofly/play-libraries/tree/master/amf>
-* **Documentation:** <https://github.com/Rhinofly/play-libraries/blob/master/amf/README.md>
+* **Website:** <https://github.com/Rhinofly/play-amf>
+* **Documentation:** <https://github.com/Rhinofly/play-amf/blob/master/README.md>
 * **Short description:** AMF (ActionScript Message Format) support for Play
 
 ## Authentication and Authorization module (Scala)
@@ -131,7 +125,7 @@
 ## HTML5 Tags module (Java and Scala)
 * **Website:** <https://github.com/loicdescotte/Play2-HTML5Tags>
 * **Documentation:** <https://github.com/loicdescotte/Play2-HTML5Tags/blob/master/README.md>
-* **Short description:** This tags add client side validation capabilities, based on model contraints (e.g required, email pattern, max|min lentgh...) and specific input fields (date, telephone number, url...) to Play templates
+* **Short description:** This tags add client side validation capabilities, based on model constraints (e.g required, email pattern, max|min lentgh...) and specific input fields (date, telephone number, url...) to Play templates
 
 ## InputValidator (Scala)
 
@@ -150,7 +144,7 @@
 
 ## JsMessages
 
-* **Wesite:** <https://github.com/julienrf/play-jsmessages>
+* **Website:** <https://github.com/julienrf/play-jsmessages>
 * **Short description:** Allows to compute localized messages on client side.
 
 ## JSON minification Plugin
@@ -178,6 +172,12 @@
 
 * **Website:** <https://github.com/mumoshu/play2-memcached>
 * **Short description:** provides a memcached based cache implementation
+
+## Messages Compiler Plugin (Scala)
+
+* **Website:** <https://github.com/tegonal/play-messagescompiler>
+* **Documentation:** <https://github.com/tegonal/play-messagescompiler/blob/master/readme.md>
+* **Short description:** Provides type safety for the project's messages.
 
 ## MongoDB Jackson Mapper Plugin (Java)
 
@@ -297,12 +297,6 @@ your Play application.
 
 * **Website:** <http://www.securesocial.ws/>
 * **Short description:** An authentication module supporting OAuth, OAuth2, OpenID, Username/Password and custom authentication schemes.
- 
-## Session cache (Scala)
-
-* **Website:** <https://github.com/Rhinofly/play-libraries/tree/master/session-cache>
-* **Documentation:** <https://github.com/Rhinofly/play-libraries/tree/master/session-cache/README.md>
-* **Short description:** Session cache for Play 
 
 ## Sitemap Generator (Java)
 

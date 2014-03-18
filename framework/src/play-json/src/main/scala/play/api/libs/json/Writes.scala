@@ -12,7 +12,7 @@ import scala.reflect.ClassTag
  * Json serializer: write an implicit to define a serializer for any type
  */
 @implicitNotFound(
-  "No Json deserializer found for type ${A}. Try to implement an implicit Writes or Format for this type."
+  "No Json serializer found for type ${A}. Try to implement an implicit Writes or Format for this type."
 )
 trait Writes[-A] {
 
@@ -34,7 +34,7 @@ trait Writes[-A] {
 }
 
 @implicitNotFound(
-  "No Json deserializer as JsObject found for type ${A}. Try to implement an implicit OWrites or Format for this type."
+  "No Json serializer as JsObject found for type ${A}. Try to implement an implicit OWrites or Format for this type."
 )
 trait OWrites[-A] extends Writes[A] {
 
@@ -238,6 +238,13 @@ trait DefaultWrites {
    */
   def sqlDateWrites(pattern: String): Writes[java.sql.Date] = new Writes[java.sql.Date] {
     def writes(d: java.sql.Date): JsValue = JsString(new java.text.SimpleDateFormat(pattern).format(d))
+  }
+
+  /**
+   * Serializer for java.util.UUID
+   */
+  implicit object UuidWrites extends Writes[java.util.UUID] {
+    def writes(u: java.util.UUID) = JsString(u.toString())
   }
 
 }

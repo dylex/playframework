@@ -3,22 +3,24 @@
  */
 package anorm
 
+import java.util.{ Date, UUID }
+import java.sql.{ Connection, PreparedStatement }
+
 import scala.language.{ postfixOps, reflectiveCalls }
+import scala.collection.TraversableOnce
 
-import MayErr._
-import java.util.Date
-import collection.TraversableOnce
-import java.util.UUID
+/** Error from processing SQL */
+sealed trait SqlRequestError
 
-abstract class SqlRequestError
-case class ColumnNotFound(columnName: String, possibilities: List[String]) extends SqlRequestError {
-  override def toString = columnName + " not found, available columns : " + possibilities.map { p => p.dropWhile(c => c == '.') }
-    .mkString(", ")
+case class ColumnNotFound(column: String, possibilities: List[String])
+    extends SqlRequestError {
+
+  override lazy val toString = s"$column not found, available columns : " +
+    possibilities.map { p => p.dropWhile(c => c == '.') }.mkString(", ")
 }
 
 case class TypeDoesNotMatch(message: String) extends SqlRequestError
 case class UnexpectedNullableFound(on: String) extends SqlRequestError
-case object NoColumnsInReturnedResult extends SqlRequestError
 case class SqlMappingError(msg: String) extends SqlRequestError
 
 abstract class Pk[+ID] {
@@ -45,271 +47,60 @@ case object NotAssigned extends Pk[Nothing] {
   override def toString() = "NotAssigned"
 }
 
-trait Column[A] extends ((Any, MetaDataItem) => MayErr[SqlRequestError, A])
-
-object Column {
-
-  def apply[A](transformer: ((Any, MetaDataItem) => MayErr[SqlRequestError, A])): Column[A] = new Column[A] {
-
-    def apply(value: Any, meta: MetaDataItem): MayErr[SqlRequestError, A] = transformer(value, meta)
-
-  }
-
-  def nonNull[A](transformer: ((Any, MetaDataItem) => MayErr[SqlRequestError, A])): Column[A] = Column[A] {
-    case (value, meta @ MetaDataItem(qualified, _, _)) =>
-      if (value != null) transformer(value, meta) else Left(UnexpectedNullableFound(qualified.toString))
-  }
-
-  implicit def rowToString: Column[String] = {
-    Column.nonNull[String] { (value, meta) =>
-      val MetaDataItem(qualified, nullable, clazz) = meta
-      value match {
-        case string: String => Right(string)
-        case clob: java.sql.Clob => Right(clob.getSubString(1, clob.length.asInstanceOf[Int]))
-        case _ => Left(TypeDoesNotMatch("Cannot convert " + value + ":" + value.asInstanceOf[AnyRef].getClass + " to String for column " + qualified))
-      }
-    }
-  }
-
-  implicit def rowToInt: Column[Int] = Column.nonNull { (value, meta) =>
-    val MetaDataItem(qualified, nullable, clazz) = meta
-    value match {
-      case int: Int => Right(int)
-      case _ => Left(TypeDoesNotMatch("Cannot convert " + value + ":" + value.asInstanceOf[AnyRef].getClass + " to Int for column " + qualified))
-    }
-  }
-
-  implicit def rowToDouble: Column[Double] = Column.nonNull { (value, meta) =>
-    val MetaDataItem(qualified, nullable, clazz) = meta
-    value match {
-      case d: Double => Right(d)
-      case _ => Left(TypeDoesNotMatch("Cannot convert " + value + ":" + value.asInstanceOf[AnyRef].getClass + " to Double for column " + qualified))
-    }
-  }
-
-  implicit def rowToShort: Column[Short] = Column.nonNull { (value, meta) =>
-    val MetaDataItem(qualified, nullable, clazz) = meta
-    value match {
-      case short: Short => Right(short)
-      case _ => Left(TypeDoesNotMatch("Cannot convert " + value + ":" + value.asInstanceOf[AnyRef].getClass + " to Short for column " + qualified))
-    }
-  }
-
-  implicit def rowToByte: Column[Byte] = Column.nonNull { (value, meta) =>
-    val MetaDataItem(qualified, nullable, clazz) = meta
-    value match {
-      case byte: Byte => Right(byte)
-      case _ => Left(TypeDoesNotMatch("Cannot convert " + value + ":" + value.asInstanceOf[AnyRef].getClass + " to Byte for column " + qualified))
-    }
-  }
-
-  implicit def rowToBoolean: Column[Boolean] = Column.nonNull { (value, meta) =>
-    val MetaDataItem(qualified, nullable, clazz) = meta
-    value match {
-      case bool: Boolean => Right(bool)
-      case _ => Left(TypeDoesNotMatch("Cannot convert " + value + ":" + value.asInstanceOf[AnyRef].getClass + " to Boolean for column " + qualified))
-    }
-  }
-
-  implicit def rowToLong: Column[Long] = Column.nonNull { (value, meta) =>
-    val MetaDataItem(qualified, nullable, clazz) = meta
-    value match {
-      case int: Int => Right(int: Long)
-      case long: Long => Right(long)
-      case _ => Left(TypeDoesNotMatch("Cannot convert " + value + ":" + value.asInstanceOf[AnyRef].getClass + " to Long for column " + qualified))
-    }
-  }
-
-  implicit def rowToBigInteger: Column[java.math.BigInteger] = Column.nonNull { (value, meta) =>
-    import java.math.BigInteger
-    val MetaDataItem(qualified, nullable, clazz) = meta
-    value match {
-      case bi: BigInteger => Right(bi)
-      case int: Int => Right(BigInteger.valueOf(int))
-      case long: Long => Right(BigInteger.valueOf(long))
-      case _ => Left(TypeDoesNotMatch("Cannot convert " + value + ":" + value.asInstanceOf[AnyRef].getClass + " to BigInteger for column " + qualified))
-    }
-  }
-
-  implicit def rowToUUID: Column[UUID] = Column.nonNull { (value, meta) =>
-    val MetaDataItem(qualified, nullable, clazz) = meta
-    value match {
-      case d: UUID => Right(d)
-      case _ => Left(TypeDoesNotMatch("Cannot convert " + value + ":" + value.asInstanceOf[AnyRef].getClass + " to UUID for column " + qualified))
-    }
-  }
-
-  implicit def rowToBigDecimal: Column[java.math.BigDecimal] = Column.nonNull { (value, meta) =>
-    import java.math.BigDecimal
-    val MetaDataItem(qualified, nullable, clazz) = meta
-    value match {
-      case bi: java.math.BigDecimal => Right(bi)
-      case double: Double => Right(new java.math.BigDecimal(double))
-      case _ => Left(TypeDoesNotMatch("Cannot convert " + value + ":" + value.asInstanceOf[AnyRef].getClass + " to BigDecimal for column " + qualified))
-    }
-  }
-
-  implicit def rowToDate: Column[Date] = Column.nonNull { (value, meta) =>
-    val MetaDataItem(qualified, nullable, clazz) = meta
-    value match {
-      case date: Date => Right(date)
-      case _ => Left(TypeDoesNotMatch("Cannot convert " + value + ":" + value.asInstanceOf[AnyRef].getClass + " to Date for column " + qualified))
-    }
-  }
-
-  implicit def rowToPk[T](implicit c: Column[T]): Column[Pk[T]] = Column.nonNull { (value, meta) =>
-    c(value, meta).map(Id(_))
-
-  }
-
-  implicit def rowToOption[T](implicit transformer: Column[T]): Column[Option[T]] = Column { (value, meta) =>
-    if (value != null) transformer(value, meta).map(Some(_)) else (Right(None): MayErr[SqlRequestError, Option[T]])
-  }
-
-}
-
-case class TupleFlattener[F](f: F)
-
-trait PriorityOne {
-  implicit def flattenerTo2[T1, T2]: TupleFlattener[(T1 ~ T2) => (T1, T2)] = TupleFlattener[(T1 ~ T2) => (T1, T2)] { case (t1 ~ t2) => (t1, t2) }
-}
-
-trait PriorityTwo extends PriorityOne {
-  implicit def flattenerTo3[T1, T2, T3]: TupleFlattener[(T1 ~ T2 ~ T3) => (T1, T2, T3)] = TupleFlattener[(T1 ~ T2 ~ T3) => (T1, T2, T3)] { case (t1 ~ t2 ~ t3) => (t1, t2, t3) }
-}
-
-trait PriorityThree extends PriorityTwo {
-  implicit def flattenerTo4[T1, T2, T3, T4]: TupleFlattener[(T1 ~ T2 ~ T3 ~ T4) => (T1, T2, T3, T4)] = TupleFlattener[(T1 ~ T2 ~ T3 ~ T4) => (T1, T2, T3, T4)] { case (t1 ~ t2 ~ t3 ~ t4) => (t1, t2, t3, t4) }
-}
-
-trait PriorityFour extends PriorityThree {
-  implicit def flattenerTo5[T1, T2, T3, T4, T5]: TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5) => (T1, T2, T3, T4, T5)] = TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5) => (T1, T2, T3, T4, T5)] { case (t1 ~ t2 ~ t3 ~ t4 ~ t5) => (t1, t2, t3, t4, t5) }
-}
-
-trait PriorityFive extends PriorityFour {
-  implicit def flattenerTo6[T1, T2, T3, T4, T5, T6]: TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5 ~ T6) => (T1, T2, T3, T4, T5, T6)] = TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5 ~ T6) => (T1, T2, T3, T4, T5, T6)] { case (t1 ~ t2 ~ t3 ~ t4 ~ t5 ~ t6) => (t1, t2, t3, t4, t5, t6) }
-}
-
-trait PrioritySix extends PriorityFive {
-  implicit def flattenerTo7[T1, T2, T3, T4, T5, T6, T7]: TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5 ~ T6 ~ T7) => (T1, T2, T3, T4, T5, T6, T7)] = TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5 ~ T6 ~ T7) => (T1, T2, T3, T4, T5, T6, T7)] { case (t1 ~ t2 ~ t3 ~ t4 ~ t5 ~ t6 ~ t7) => (t1, t2, t3, t4, t5, t6, t7) }
-}
-
-trait PrioritySeven extends PrioritySix {
-  implicit def flattenerTo8[T1, T2, T3, T4, T5, T6, T7, T8]: TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5 ~ T6 ~ T7 ~ T8) => (T1, T2, T3, T4, T5, T6, T7, T8)] = TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5 ~ T6 ~ T7 ~ T8) => (T1, T2, T3, T4, T5, T6, T7, T8)] { case (t1 ~ t2 ~ t3 ~ t4 ~ t5 ~ t6 ~ t7 ~ t8) => (t1, t2, t3, t4, t5, t6, t7, t8) }
-}
-
-trait PriorityEight extends PrioritySeven {
-  implicit def flattenerTo9[T1, T2, T3, T4, T5, T6, T7, T8, T9]: TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5 ~ T6 ~ T7 ~ T8 ~ T9) => (T1, T2, T3, T4, T5, T6, T7, T8, T9)] = TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5 ~ T6 ~ T7 ~ T8 ~ T9) => (T1, T2, T3, T4, T5, T6, T7, T8, T9)] { case (t1 ~ t2 ~ t3 ~ t4 ~ t5 ~ t6 ~ t7 ~ t8 ~ t9) => (t1, t2, t3, t4, t5, t6, t7, t8, t9) }
-}
-
-trait PriorityNine extends PriorityEight {
-  implicit def flattenerTo10[T1, T2, T3, T4, T5, T6, T7, T8, T9, T10]: TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5 ~ T6 ~ T7 ~ T8 ~ T9 ~ T10) => (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)] = TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5 ~ T6 ~ T7 ~ T8 ~ T9 ~ T10) => (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)] { case (t1 ~ t2 ~ t3 ~ t4 ~ t5 ~ t6 ~ t7 ~ t8 ~ t9 ~ t10) => (t1, t2, t3, t4, t5, t6, t7, t8, t9, t10) }
-}
-
-object TupleFlattener extends PriorityNine {
-  implicit def flattenerTo11[T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11]: TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5 ~ T6 ~ T7 ~ T8 ~ T9 ~ T10 ~ T11) => (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)] = TupleFlattener[(T1 ~ T2 ~ T3 ~ T4 ~ T5 ~ T6 ~ T7 ~ T8 ~ T9 ~ T10 ~ T11) => (T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)] { case (t1 ~ t2 ~ t3 ~ t4 ~ t5 ~ t6 ~ t7 ~ t8 ~ t9 ~ t10 ~ t11) => (t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11) }
-}
-
-object Row {
-  def unapplySeq(row: Row): Option[List[Any]] = Some(row.asList)
-}
+/**
+ * Untyped value wrapper.
+ *
+ * {{{
+ * SQL("UPDATE t SET val = {o}").on('o -> anorm.Object(val))
+ * }}}
+ */
+case class Object(value: Any)
 
 case class MetaDataItem(column: ColumnName, nullable: Boolean, clazz: String)
 case class ColumnName(qualified: String, alias: Option[String])
 
-case class MetaData(ms: List[MetaDataItem]) {
-  def get(columnName: String) = {
-    val columnUpper = columnName.toUpperCase()
-    dictionary2.get(columnUpper)
-      .orElse(dictionary.get(columnUpper))
+private[anorm] case class MetaData(ms: List[MetaDataItem]) {
+  // Use MetaDataItem rather than (ColumnName, Boolean, String)?
+  def get(columnName: String): Option[(ColumnName, Boolean, String)] = {
+    val columnUpper = columnName.toUpperCase
+    dictionary2.get(columnUpper).orElse(dictionary.get(columnUpper))
   }
 
-  def getAliased(aliasName: String) = {
-    val columnUpper = aliasName.toUpperCase()
-    aliasedDictionary.get(columnUpper)
-  }
+  // Use MetaDataItem rather than (ColumnName, Boolean, String)?
+  def getAliased(aliasName: String): Option[(ColumnName, Boolean, String)] =
+    aliasedDictionary.get(aliasName.toUpperCase)
 
   private lazy val dictionary: Map[String, (ColumnName, Boolean, String)] =
     ms.map(m => (m.column.qualified.toUpperCase(), (m.column, m.nullable, m.clazz))).toMap
 
-  private lazy val dictionary2: Map[String, (ColumnName, Boolean, String)] = {
+  private lazy val dictionary2: Map[String, (ColumnName, Boolean, String)] =
     ms.map(m => {
       val column = m.column.qualified.split('.').last;
       (column.toUpperCase(), (m.column, m.nullable, m.clazz))
     }).toMap
-  }
 
   private lazy val aliasedDictionary: Map[String, (ColumnName, Boolean, String)] = {
     ms.flatMap(m => {
       m.column.alias.map { a =>
-        Map(a.toUpperCase() -> (m.column, m.nullable, m.clazz))
+        Map(a.toUpperCase() -> Tuple3(m.column, m.nullable, m.clazz))
       }.getOrElse(Map.empty)
-
     }).toMap
   }
 
   lazy val columnCount = ms.size
 
-  lazy val availableColumns: List[String] = ms.flatMap(i => i.column.qualified :: i.column.alias.toList)
+  lazy val availableColumns: List[String] =
+    ms.flatMap(i => i.column.qualified :: i.column.alias.toList)
 
-}
-
-trait Row {
-
-  val metaData: MetaData
-
-  import scala.reflect.Manifest
-
-  protected[anorm] val data: List[Any]
-
-  lazy val asList = data.zip(metaData.ms.map(_.nullable)).map(i => if (i._2) Option(i._1) else i._1)
-
-  lazy val asMap: scala.collection.Map[String, Any] = metaData.ms.map(_.column.qualified).zip(asList).toMap
-
-  def get[A](a: String)(implicit c: Column[A]): MayErr[SqlRequestError, A] = SqlParser.get(a)(c)(this) match {
-    case Success(a) => Right(a)
-    case Error(e) => Left(e)
-  }
-
-  private def getType(t: String) = t match {
-    case "long" => Class.forName("java.lang.Long")
-    case "int" => Class.forName("java.lang.Integer")
-    case "boolean" => Class.forName("java.lang.Boolean")
-    case _ => Class.forName(t)
-  }
-
-  private lazy val ColumnsDictionary: Map[String, Any] = metaData.ms.map(_.column.qualified.toUpperCase()).zip(data).toMap
-  private lazy val AliasesDictionary: Map[String, Any] = metaData.ms.flatMap(_.column.alias.map(_.toUpperCase())).zip(data).toMap
-  private[anorm] def get1(a: String): MayErr[SqlRequestError, Any] = {
-    for (
-      meta <- metaData.get(a).toRight(ColumnNotFound(a, metaData.availableColumns));
-      (column, nullable, clazz) = meta;
-      result <- ColumnsDictionary.get(column.qualified.toUpperCase()).toRight(ColumnNotFound(column.qualified, metaData.availableColumns))
-    ) yield result
-  }
-
-  private[anorm] def getAliased(a: String): MayErr[SqlRequestError, Any] = {
-    for (
-      meta <- metaData.getAliased(a).toRight(ColumnNotFound(a, metaData.availableColumns));
-      (column, nullable, clazz) = meta;
-      result <- column.alias.flatMap(a => AliasesDictionary.get(a.toUpperCase())).toRight(ColumnNotFound(column.alias.getOrElse(a), metaData.availableColumns))
-    ) yield result
-  }
-
-  def apply[B](a: String)(implicit c: Column[B]): B = get[B](a)(c).get
-
-}
-
-case class MockRow(data: List[Any], metaData: MetaData) extends Row
-
-case class SqlRow(metaData: MetaData, data: List[Any]) extends Row {
-  override def toString() = "Row(" + metaData.ms.zip(data).map(t => "'" + t._1.column + "':" + t._2 + " as " + t._1.clazz).mkString(", ") + ")"
 }
 
 object Useful {
 
   case class Var[T](var content: T)
 
+  @deprecated(
+    message = "Use [[scala.collection.immutable.Stream.dropWhile]] directly",
+    since = "2.3.0")
   def drop[A](these: Var[Stream[A]], n: Int): Stream[A] = {
     var count = n
     while (!these.content.isEmpty && count > 0) {
@@ -331,204 +122,276 @@ object Useful {
 
 }
 
-trait ToStatement[A] { def set(s: java.sql.PreparedStatement, index: Int, aValue: A): Unit }
-object ToStatement {
+/**
+ * Wrapper to use [[Seq]] as SQL parameter, with custom formatting.
+ *
+ * {{{
+ * SQL("SELECT * FROM t WHERE %s").
+ *   on(SeqParameter(Seq("a", "b"), " OR ", Some("cat = ")))
+ * // Will execute as:
+ * // SELECT * FROM t WHERE cat = 'a' OR cat = 'b'
+ * }}}
+ */
+sealed trait SeqParameter[A] {
+  def values: Seq[A]
+  def separator: String
+  def before: Option[String]
+  def after: Option[String]
+}
 
-  implicit def anyParameter[T] = new ToStatement[T] {
-    private def setAny(index: Int, value: Any, stmt: java.sql.PreparedStatement): java.sql.PreparedStatement = {
-      value match {
-        case Some(bd: java.math.BigDecimal) => stmt.setBigDecimal(index, bd)
-        case Some(o) => stmt.setObject(index, o)
-        case None => stmt.setObject(index, null)
-        case bd: java.math.BigDecimal => stmt.setBigDecimal(index, bd)
-        case date: java.util.Date => stmt.setTimestamp(index, new java.sql.Timestamp(date.getTime()))
-        case Id(id) => stmt.setObject(index, id)
-        case NotAssigned => stmt.setObject(index, null)
-        case o => stmt.setObject(index, o)
-      }
-      stmt
+/** SeqParameter factory */
+object SeqParameter {
+  def apply[A](
+    seq: Seq[A], sep: String = ", ",
+    pre: String = "", post: String = ""): SeqParameter[A] =
+    new SeqParameter[A] {
+      val values = seq
+      val separator = sep
+      val before = Option(pre)
+      val after = Option(post)
+    }
+}
+
+/** Applied named parameter. */
+sealed case class NamedParameter(name: String, value: ParameterValue) {
+  lazy val tupled: (String, ParameterValue) = (name, value)
+}
+
+/** Companion object for applied named parameter. */
+object NamedParameter {
+  import scala.language.implicitConversions
+
+  /**
+   * Conversion to use tuple, with first element being name
+   * of parameter as string.
+   *
+   * {{{
+   * val p: Parameter = ("name" -> 1l)
+   * }}}
+   */
+  implicit def string[V](t: (String, V))(implicit c: V => ParameterValue): NamedParameter = NamedParameter(t._1, c(t._2))
+
+  /**
+   * Conversion to use tuple,
+   * with first element being symbolic name or parameter.
+   *
+   * {{{
+   * val p: Parameter = ('name -> 1l)
+   * }}}
+   */
+  implicit def symbol[V](t: (Symbol, V))(implicit c: V => ParameterValue): NamedParameter = NamedParameter(t._1.name, c(t._2))
+
+}
+
+/** Simple/plain SQL. */
+case class SimpleSql[T](sql: SqlQuery, params: Map[String, ParameterValue], defaultParser: RowParser[T]) extends Sql {
+
+  /**
+   * Returns query prepared with named parameters.
+   *
+   * {{{
+   * import anorm.toParameterValue
+   *
+   * val baseSql = SQL("SELECT * FROM table WHERE id = {id}") // one named param
+   * val preparedSql = baseSql.withParams("id" -> "value")
+   * }}}
+   */
+  def on(args: NamedParameter*): SimpleSql[T] =
+    copy(params = this.params ++ args.map(_.tupled))
+
+  /**
+   * Returns query prepared with parameters using initial order
+   * of placeholder in statement.
+   *
+   * {{{
+   * import anorm.toParameterValue
+   *
+   * val baseSql =
+   *   SQL("SELECT * FROM table WHERE name = {name} AND lang = {lang}")
+   *
+   * val preparedSql = baseSql.onParams("1st", "2nd")
+   * // 1st param = name, 2nd param = lang
+   * }}}
+   */
+  def onParams(args: ParameterValue*): SimpleSql[T] =
+    copy(params = this.params ++ Sql.zipParams(
+      sql.argsInitialOrder, args, Map.empty))
+
+  // TODO: Scaladoc as `as` equivalent
+  def list()(implicit connection: Connection): Seq[T] = as(defaultParser.*)
+
+  // TODO: Scaladoc as `as` equivalent
+  def single()(implicit connection: Connection): T = as(defaultParser.single)
+
+  // TODO: Scaladoc, add to specs as `as` equivalent
+  def singleOpt()(implicit connection: Connection): Option[T] =
+    as(defaultParser.singleOpt)
+
+  def getFilledStatement(connection: Connection, getGeneratedKeys: Boolean = false) = {
+    val st: (String, Seq[(Int, ParameterValue)]) =
+      Sql.prepareQuery(sql.query, 0, sql.argsInitialOrder.map(params), Nil)
+
+    val stmt = if (getGeneratedKeys) connection.prepareStatement(st._1, java.sql.Statement.RETURN_GENERATED_KEYS) else connection.prepareStatement(st._1)
+
+    sql.queryTimeout.foreach(timeout => stmt.setQueryTimeout(timeout))
+
+    st._2 foreach { p =>
+      val (i, v) = p
+      v.set(stmt, i + 1)
     }
 
-    def set(s: java.sql.PreparedStatement, index: Int, aValue: T): Unit = setAny(index, aValue, s)
+    stmt
   }
 
-  implicit val dateToStatement = new ToStatement[java.util.Date] {
-    def set(s: java.sql.PreparedStatement, index: Int, aValue: java.util.Date): Unit = s.setTimestamp(index, new java.sql.Timestamp(aValue.getTime()))
+  /**
+   * Prepares query with given row parser.
+   *
+   * {{{
+   * import anorm.{ SQL, SqlParser }
+   *
+   * val res: Int = SQL("SELECT 1").using(SqlParser.scalar[Int]).single
+   * // Equivalent to: SQL("SELECT 1").as(SqlParser.scalar[Int].single)
+   * }}}
+   */
+  def using[U](p: RowParser[U]): SimpleSql[U] = copy(sql, params, p)
+  // Deprecates with .as ?
 
-  }
+  def map[A](f: T => A): SimpleSql[A] =
+    copy(defaultParser = defaultParser.map(f))
 
-  implicit def optionToStatement[A](implicit ts: ToStatement[A]): ToStatement[Option[A]] = new ToStatement[Option[A]] {
-    def set(s: java.sql.PreparedStatement, index: Int, aValue: Option[A]): Unit = {
-      aValue match {
-        case Some(o) => ts.set(s, index, o)
-        case None => s.setObject(index, null)
-      }
-    }
-  }
-
-  implicit val uuidToStatement = new ToStatement[UUID] {
-    def set(s: java.sql.PreparedStatement, index: Int, aValue: UUID): Unit = s.setObject(index, aValue)
-  }
-
-  implicit def pkToStatement[A](implicit ts: ToStatement[A]): ToStatement[Pk[A]] = new ToStatement[Pk[A]] {
-    def set(s: java.sql.PreparedStatement, index: Int, aValue: Pk[A]): Unit =
-      aValue match {
-        case Id(id) => ts.set(s, index, id)
-        case NotAssigned => s.setObject(index, null)
-      }
-  }
+  def withQueryTimeout(seconds: Option[Int]): SimpleSql[T] =
+    copy(sql = sql.withQueryTimeout(seconds))
 
 }
 
-import SqlParser._
-case class ParameterValue[A](aValue: A, statementSetter: ToStatement[A]) {
-  def set(s: java.sql.PreparedStatement, index: Int) = statementSetter.set(s, index, aValue)
-}
+sealed trait Sql {
 
-case class SimpleSql[T](sql: SqlQuery, params: Seq[(String, ParameterValue[_])], defaultParser: RowParser[T]) extends Sql {
+  def getFilledStatement(connection: Connection, getGeneratedKeys: Boolean = false): PreparedStatement
 
-  def on(args: (Any, ParameterValue[_])*): SimpleSql[T] = this.copy(params = (this.params) ++ args.map {
-    case (s: Symbol, v) => (s.name, v)
-    case (k, v) => (k.toString, v)
-  })
+  @deprecated(message = "Use [[getFilledStatement]] or [[executeQuery]]", since = "2.3.0")
+  def filledStatement(implicit connection: Connection) = getFilledStatement(connection)
 
-  def onParams(args: ParameterValue[_]*): SimpleSql[T] = this.copy(params = (this.params) ++ sql.argsInitialOrder.zip(args))
+  /**
+   * Executes this SQL statement as query, returns result as Row stream.
+   */
+  def apply()(implicit connection: Connection): Stream[Row] =
+    Sql.resultSetToStream(resultSet())
 
-  def list()(implicit connection: java.sql.Connection): Seq[T] = as(defaultParser*)
+  /**
+   * Executes this statement as query (see [[executeQuery]]) and returns result.
+   */
+  private[anorm] def resultSet()(implicit connection: Connection) = (getFilledStatement(connection).executeQuery())
 
-  def single()(implicit connection: java.sql.Connection): T = as(ResultSetParser.single(defaultParser))
+  /**
+   * Executes this statement as query and convert result as `T`, using parser.
+   */
+  def as[T](parser: ResultSetParser[T])(implicit connection: Connection): T =
+    Sql.as[T](parser, resultSet())
 
-  def singleOpt()(implicit connection: java.sql.Connection): Option[T] = as(ResultSetParser.singleOpt(defaultParser))
+  @deprecated(
+    message = "Use [[as]] with rowParser.*",
+    since = "2.3.0")
+  def list[A](rowParser: RowParser[A])(implicit connection: Connection): Seq[A] = as(rowParser.*)
 
-  //def first()(implicit connection: java.sql.Connection): Option[T] = parse((guard(acceptMatch("not at end", { case Right(_) => Unit })) ~> commit(defaultParser))?)
+  @deprecated(
+    message = "Use [[as]] with rowParser.single",
+    since = "2.3.0")
+  def single[T](rowParser: RowParser[T])(implicit connection: Connection): T = as(rowParser.single)
 
-  def getFilledStatement(connection: java.sql.Connection, getGeneratedKeys: Boolean = false) = {
-    val s = if (getGeneratedKeys) connection.prepareStatement(sql.query, java.sql.Statement.RETURN_GENERATED_KEYS)
-    else connection.prepareStatement(sql.query)
+  @deprecated(
+    message = "Use [[as]] with rowParser.singleOpt",
+    since = "2.3.0")
+  def singleOpt[T](rowParser: RowParser[T])(implicit connection: Connection): Option[T] = as(rowParser.singleOpt)
 
-    sql.queryTimeout.foreach(timeout => s.setQueryTimeout(timeout))
+  @deprecated(message = "Use [[as]]", since = "2.3.0")
+  def parse[T](parser: ResultSetParser[T])(implicit connection: Connection): T = as(parser)
 
-    val argsMap = Map(params: _*)
-    sql.argsInitialOrder.map(argsMap)
-      .zipWithIndex
-      .map(_.swap)
-      .foldLeft(s)((s, e) => { e._2.set(s, e._1 + 1); s })
-  }
+  /**
+   * Executes this SQL statement.
+   * @return true if resultset was returned from execution
+   * (statement is query), or false if it executed update
+   */
+  def execute()(implicit connection: Connection): Boolean = getFilledStatement(connection).execute()
 
-  def using[U](p: RowParser[U]): SimpleSql[U] = SimpleSql(sql, params, p)
-
-  def map[A](f: T => A): SimpleSql[A] = this.copy(defaultParser = defaultParser.map(f))
-
-  def withQueryTimeout(seconds: Option[Int]): SimpleSql[T] = this.copy(sql = sql.withQueryTimeout(seconds))
-}
-
-case class BatchSql(sql: SqlQuery, params: Seq[Seq[(String, ParameterValue[_])]]) {
-
-  def addBatch(args: (String, ParameterValue[_])*): BatchSql = this.copy(params = (this.params) :+ args)
-  def addBatchList(paramsMapList: TraversableOnce[Seq[(String, ParameterValue[_])]]): BatchSql = this.copy(params = (this.params) ++ paramsMapList)
-
-  def addBatchParams(args: ParameterValue[_]*): BatchSql = this.copy(params = (this.params) :+ sql.argsInitialOrder.zip(args))
-  def addBatchParamsList(paramsSeqList: TraversableOnce[Seq[ParameterValue[_]]]): BatchSql = this.copy(params = (this.params) ++ paramsSeqList.map(paramsSeq => sql.argsInitialOrder.zip(paramsSeq)))
-
-  def getFilledStatement(connection: java.sql.Connection, getGeneratedKeys: Boolean = false) = {
-    val statement = if (getGeneratedKeys) connection.prepareStatement(sql.query, java.sql.Statement.RETURN_GENERATED_KEYS)
-    else connection.prepareStatement(sql.query)
-
-    sql.queryTimeout.foreach(timeout => statement.setQueryTimeout(timeout))
-
-    params.foldLeft(statement)((s, ps) => {
-      val argsMap = Map(ps: _*)
-      val result = sql.argsInitialOrder
-        .map(argsMap)
-        .zipWithIndex
-        .map(_.swap)
-        .foldLeft(s)((s, e) => { e._2.set(s, e._1 + 1); s })
-      s.addBatch()
-      result
-    })
-  }
-
-  def filledStatement(implicit connection: java.sql.Connection) = getFilledStatement(connection)
-
-  def execute()(implicit connection: java.sql.Connection): Array[Int] = getFilledStatement(connection).executeBatch()
-
-  def withQueryTimeout(seconds: Option[Int]): BatchSql = this.copy(sql = sql.withQueryTimeout(seconds))
-}
-
-trait Sql {
-
-  import SqlParser._
-  import scala.util.control.Exception._
-
-  def getFilledStatement(connection: java.sql.Connection, getGeneratedKeys: Boolean = false): java.sql.PreparedStatement
-
-  def filledStatement(implicit connection: java.sql.Connection) = getFilledStatement(connection)
-
-  def apply()(implicit connection: java.sql.Connection) = Sql.resultSetToStream(resultSet())
-
-  def resultSet()(implicit connection: java.sql.Connection) = (getFilledStatement(connection).executeQuery())
-
-  import SqlParser._
-
-  def as[T](parser: ResultSetParser[T])(implicit connection: java.sql.Connection): T = Sql.as[T](parser, resultSet())
-
-  def list[A](rowParser: RowParser[A])(implicit connection: java.sql.Connection): Seq[A] = as(rowParser *)
-
-  def single[A](rowParser: RowParser[A])(implicit connection: java.sql.Connection): A = as(ResultSetParser.single(rowParser))
-
-  def singleOpt[A](rowParser: RowParser[A])(implicit connection: java.sql.Connection): Option[A] = as(ResultSetParser.singleOpt(rowParser))
-
-  def parse[T](parser: ResultSetParser[T])(implicit connection: java.sql.Connection): T = Sql.parse[T](parser, resultSet())
-
-  def execute()(implicit connection: java.sql.Connection): Boolean = getFilledStatement(connection).execute()
-
-  def execute1(getGeneratedKeys: Boolean = false)(implicit connection: java.sql.Connection): (java.sql.PreparedStatement, Int) = {
+  def execute1(getGeneratedKeys: Boolean = false)(implicit connection: Connection): (PreparedStatement, Int) = {
     val statement = getFilledStatement(connection, getGeneratedKeys)
-    (statement, { statement.executeUpdate() })
+    (statement, statement.executeUpdate())
   }
 
-  def executeUpdate()(implicit connection: java.sql.Connection): Int =
+  /**
+   * Executes this SQL as an update statement.
+   * @return Count of update row(s)
+   */
+  @throws[java.sql.SQLException]("If statement is query not update")
+  def executeUpdate()(implicit connection: Connection): Int =
     getFilledStatement(connection).executeUpdate()
 
-  def executeInsert[A](generatedKeysParser: ResultSetParser[A] = scalar[Long].singleOpt)(implicit connection: java.sql.Connection): A = {
-    Sql.as(generatedKeysParser, execute1(getGeneratedKeys = true)._1.getGeneratedKeys)
-  }
+  // TODO: Scaladoc and specs
+  def executeInsert[A](generatedKeysParser: ResultSetParser[A] = SqlParser.scalar[Long].singleOpt)(implicit connection: Connection): A =
+    Sql.as(generatedKeysParser,
+      execute1(getGeneratedKeys = true)._1.getGeneratedKeys)
+
+  /**
+   * Executes this SQL query, and returns its result.
+   *
+   * {{{
+   * implicit val conn: Connection = openConnection
+   * val res: SqlQueryResult =
+   *   SQL("SELECT text_col FROM table WHERE id = {code}").
+   *   on("code" -> code).executeQuery()
+   * // Check execution context; e.g. res.statementWarning
+   * val str = res as scalar[String].single // going with row parsing
+   * }}}
+   */
+  def executeQuery()(implicit connection: Connection): SqlQueryResult =
+    SqlQueryResult(resultSet())
 
 }
 
+/** Initial SQL query, without parameter values. */
 case class SqlQuery(query: String, argsInitialOrder: List[String] = List.empty, queryTimeout: Option[Int] = None) extends Sql {
 
-  def getFilledStatement(connection: java.sql.Connection, getGeneratedKeys: Boolean = false): java.sql.PreparedStatement =
-    asSimple.getFilledStatement(connection, getGeneratedKeys)
+  def getFilledStatement(connection: Connection, getGeneratedKeys: Boolean = false): PreparedStatement = asSimple.getFilledStatement(connection, getGeneratedKeys)
 
-  def withQueryTimeout(seconds: Option[Int]): SqlQuery = this.copy(queryTimeout = seconds)
+  def withQueryTimeout(seconds: Option[Int]): SqlQuery =
+    copy(queryTimeout = seconds)
 
   private def defaultParser: RowParser[Row] = RowParser(row => Success(row))
 
-  def asSimple: SimpleSql[Row] = SimpleSql(this, Nil, defaultParser)
+  private[anorm] def asSimple: SimpleSql[Row] = asSimple(defaultParser)
 
-  def asSimple[T](parser: RowParser[T] = defaultParser): SimpleSql[T] = SimpleSql(this, Nil, parser)
+  /**
+   * Prepares query as a simple one.
+   * @param parser Row parser
+   *
+   * {{{
+   * import anorm.{ SQL, SqlParser }
+   *
+   * SQL("SELECT 1").asSimple(SqlParser.scalar[Int])
+   * }}}
+   */
+  def asSimple[T](parser: RowParser[T] = defaultParser): SimpleSql[T] =
+    SimpleSql(this, Map.empty, parser)
 
   def asBatch[T]: BatchSql = BatchSql(this, Nil)
 }
 
-object Sql {
+object Sql { // TODO: Rename to SQL
 
-  def sql(inSql: String): SqlQuery = {
+  private[anorm] def sql(inSql: String): SqlQuery = {
     val (sql, paramsNames) = SqlStatementParser.parse(inSql)
     SqlQuery(sql, paramsNames)
   }
 
-  import java.sql._
-  import java.sql.ResultSetMetaData._
+  import java.sql.{ ResultSet, ResultSetMetaData }
 
-  def metaData(rs: java.sql.ResultSet) = {
+  private[anorm] def metaData(rs: ResultSet) = {
     val meta = rs.getMetaData()
     val nbColumns = meta.getColumnCount()
     MetaData(List.range(1, nbColumns + 1).map(i =>
       MetaDataItem(column = ColumnName({
 
-        // HACK FOR POSTGRES
+        // HACK FOR POSTGRES - Fix in https://github.com/pgjdbc/pgjdbc/pull/107
         if (meta.getClass.getName.startsWith("org.postgresql.")) {
           meta.asInstanceOf[{ def getBaseTableName(i: Int): String }].getBaseTableName(i)
         } else {
@@ -536,29 +399,75 @@ object Sql {
         }
 
       } + "." + meta.getColumnName(i), alias = Option(meta.getColumnLabel(i))),
-        nullable = meta.isNullable(i) == columnNullable,
+        nullable = meta.isNullable(i) == ResultSetMetaData.columnNullable,
         clazz = meta.getColumnClassName(i))))
   }
 
-  def resultSetToStream(rs: java.sql.ResultSet): Stream[SqlRow] = {
+  // TODO: Moves to Sql trait
+  @deprecated(
+    message = "Use [[anorm.SqlQueryResult.as]] directly",
+    since = "2.3.0")
+  private def as[T](parser: ResultSetParser[T], rs: ResultSet): T =
+    parser(resultSetToStream(rs)) match {
+      case Success(a) => a
+      case Error(e) => sys.error(e.toString)
+    }
+
+  // TODO: Moves to Sql trait
+  @deprecated(
+    message = "Use [[anorm.SqlQueryResult.as]] directly",
+    since = "2.3.0")
+  private def parse[T](parser: ResultSetParser[T], rs: ResultSet): T =
+    as(parser, rs)
+
+  private[anorm] def resultSetToStream(rs: ResultSet): Stream[Row] = {
     val rsMetaData = metaData(rs)
     val columns = List.range(1, rsMetaData.columnCount + 1)
-    def data(rs: java.sql.ResultSet) = columns.map(nb => rs.getObject(nb))
+    def data(rs: ResultSet) = columns.map(nb => rs.getObject(nb))
     Useful.unfold(rs)(rs => if (!rs.next()) { rs.getStatement.close(); None } else Some((new SqlRow(rsMetaData, data(rs)), rs)))
   }
 
-  import SqlParser._
+  private case class SqlRow(metaData: MetaData, data: List[Any]) extends Row {
+    override lazy val toString = "Row(" + metaData.ms.zip(data).map(t => s"'${t._1.column}': ${t._2} as ${t._1.clazz}").mkString(", ") + ")"
+  }
 
-  def as[T](parser: ResultSetParser[T], rs: java.sql.ResultSet): T =
-    parser(resultSetToStream(rs)) match {
-      case Success(a) => a
-      case Error(e) => sys.error(e.toString)
+  @annotation.tailrec
+  private[anorm] def zipParams(ns: Seq[String], vs: Seq[ParameterValue], ps: Map[String, ParameterValue]): Map[String, ParameterValue] = (ns.headOption, vs.headOption) match {
+    case (Some(n), Some(v)) =>
+      zipParams(ns.tail, vs.tail, ps + (n -> v))
+    case _ => ps
+  }
+
+  /**
+   * Rewrites next format placeholder (%s) in statement, with fragment using
+   * [[java.sql.PreparedStatement]] syntax (with one or more '?').
+   *
+   * @param statement SQL statement (with %s placeholders)
+   * @param frag Statement fragment
+   * @return Some rewrited statement, or None if there no available placeholder
+   *
+   * {{{
+   * Sql.rewrite("SELECT * FROM Test WHERE cat IN (%s)", "?, ?")
+   * // Some("SELECT * FROM Test WHERE cat IN (?, ?)")
+   * }}}
+   */
+  private[anorm] def rewrite(stmt: String, frag: String): Option[String] = {
+    val idx = stmt.indexOf("%s")
+
+    if (idx == -1) None
+    else {
+      val parts = stmt.splitAt(idx)
+      Some(parts._1 + frag + parts._2.drop(2))
     }
+  }
 
-  def parse[T](parser: ResultSetParser[T], rs: java.sql.ResultSet): T =
-    parser(resultSetToStream(rs)) match {
-      case Success(a) => a
-      case Error(e) => sys.error(e.toString)
+  @annotation.tailrec
+  private[anorm] def prepareQuery(sql: String, i: Int, ps: Seq[ParameterValue], vs: Seq[(Int, ParameterValue)]): (String, Seq[(Int, ParameterValue)]) = {
+    ps.headOption match {
+      case Some(p) =>
+        val st: (String, Int) = p.toSql(sql, i)
+        prepareQuery(st._1, st._2, ps.tail, vs :+ (i -> p))
+      case _ => (sql, vs)
     }
-
+  }
 }

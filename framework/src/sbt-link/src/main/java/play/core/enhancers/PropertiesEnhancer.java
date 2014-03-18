@@ -54,7 +54,7 @@ public class PropertiesEnhancer {
     @Retention(RUNTIME)
     public static @interface RewrittenAccessor {}
     
-    public static void generateAccessors(String classpath, File classFile) throws Exception {
+    public static boolean generateAccessors(String classpath, File classFile) throws Exception {
         ClassPool classPool = new ClassPool();
         classPool.appendSystemPath();
         classPool.appendPathList(classpath);
@@ -64,7 +64,7 @@ public class PropertiesEnhancer {
             CtClass ctClass = classPool.makeClass(is);
             if(hasAnnotation(ctClass, GeneratedAccessor.class)) {
                 is.close();
-                return;
+                return false;
             }
             for (CtField ctField : ctClass.getDeclaredFields()) {
                 if(isProperty(ctField)) {
@@ -126,6 +126,7 @@ public class PropertiesEnhancer {
             FileOutputStream os = new FileOutputStream(classFile);
             os.write(ctClass.toBytecode());
             os.close();
+            return true;
             
         } catch(Exception e) {
             e.printStackTrace();
@@ -138,17 +139,17 @@ public class PropertiesEnhancer {
         }
     }
     
-    public static void rewriteAccess(String classpath, File classFile) throws Exception {
+    public static boolean rewriteAccess(String classpath, File classFile) throws Exception {
         ClassPool classPool = new ClassPool();
         classPool.appendSystemPath();
         classPool.appendPathList(classpath);
-        
+
         FileInputStream is = new FileInputStream(classFile);
         try {
             CtClass ctClass = classPool.makeClass(is);
             if(hasAnnotation(ctClass, RewrittenAccessor.class)) {
                 is.close();
-                return;
+                return false;
             }
             
             for (final CtBehavior ctMethod : ctClass.getDeclaredBehaviors()) {
@@ -206,6 +207,7 @@ public class PropertiesEnhancer {
             }
             throw e;
         }
+        return true;
     }
     
     // --

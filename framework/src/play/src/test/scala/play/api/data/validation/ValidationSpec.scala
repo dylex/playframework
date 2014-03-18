@@ -80,7 +80,7 @@ object ValidationSpec extends Specification {
 
   }
 
-  "Email contraint" should {
+  "Email constraint" should {
     val valid = Seq(
       """"Fred Bloggs"@example.com""",
       """"Joe\\Blow"@example.com""",
@@ -88,7 +88,8 @@ object ValidationSpec extends Specification {
       """customer/department=shipping@example.com""",
       """$A12345@example.com""",
       """!def!xyz%abc@example.com""",
-      """_somename@example.com"""
+      """_somename@example.com""",
+      """Ken.O'Brian@company.com"""
       )
     "validate valid addresses" in {
       valid.map{ addr =>

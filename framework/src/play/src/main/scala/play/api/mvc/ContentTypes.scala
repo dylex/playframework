@@ -18,6 +18,7 @@ import scala.collection.mutable.ListBuffer
 import scalax.io.Resource
 import java.util.Locale
 import scala.util.control.NonFatal
+import play.api.http.HttpVerbs
 
 /**
  * A request body that adapts automatically according the request Content-Type.
@@ -544,7 +545,7 @@ trait BodyParsers {
     def anyContent: BodyParser[AnyContent] = BodyParser("anyContent") { request =>
       import play.api.libs.iteratee.Execution.Implicits.trampoline
       request.contentType.map(_.toLowerCase(Locale.ENGLISH)) match {
-        case _ if request.method == "GET" || request.method == "HEAD" => {
+        case _ if request.method == HttpVerbs.GET || request.method == HttpVerbs.HEAD => {
           Play.logger.trace("Parsing AnyContent as empty")
           empty(request).map(_.right.map(_ => AnyContentAsEmpty))
         }
@@ -631,9 +632,9 @@ trait BodyParsers {
             val maxHeaderBuffer = Traversable.takeUpTo[Array[Byte]](4 * 1024) transform Iteratee.consume[Array[Byte]]()
 
             val collectHeaders = maxHeaderBuffer.map { buffer =>
-              val (headerBytes, rest) = Option(buffer.drop(2)).map(b => b.splitAt(b.indexOfSlice(CRLFCRLF))).get
+              val (headerBytes, rest) = Option(buffer).map(b => b.splitAt(b.indexOfSlice(CRLFCRLF))).get
 
-              val headerString = new String(headerBytes, "utf-8")
+              val headerString = new String(headerBytes, "utf-8").trim
               val headers = headerString.lines.map { header =>
                 val key :: value = header.trim.split(":").toList
                 (key.trim.toLowerCase, value.mkString.trim)

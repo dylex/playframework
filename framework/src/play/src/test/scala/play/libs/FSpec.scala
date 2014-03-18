@@ -154,6 +154,50 @@ object FSpec extends Specification
       }
     }
 
+    "filter its value (with default ExecutionContext)" in {
+      val p = Promise[Int]()
+      val fp = F.Promise.wrap(p.future)
+      val filtered = fp.filter(new F.Predicate[Int] {
+        def test(x: Int) = x > 0
+      })
+      p.success(1)
+      filtered.get(5, SECONDS) must equalTo(1)
+    }
+
+    "filter its value (with explicit ExecutionContext)" in {
+      val p = Promise[Int]()
+      val fp = F.Promise.wrap(p.future)
+      mustExecute(1) { ec =>
+        val filtered = fp.filter(new F.Predicate[Int] {
+          def test(x: Int) = x > 0
+        }, ec)
+        p.success(1)
+        filtered.get(5, SECONDS) must equalTo(1)
+      }
+    }
+
+    "filter to failure (with default ExecutionContext)" in {
+      val p = Promise[Int]()
+      val fp = F.Promise.wrap(p.future)
+      val filtered = fp.filter(new F.Predicate[Int] {
+        def test(x: Int) = x > 0
+      })
+      p.success(-1)
+      filtered.get(5, SECONDS) must throwA[NoSuchElementException]
+    }
+
+    "filter to failure (with explicit ExecutionContext)" in {
+      val p = Promise[Int]()
+      val fp = F.Promise.wrap(p.future)
+      mustExecute(1) { ec =>
+        val filtered = fp.filter(new F.Predicate[Int] {
+          def test(x: Int) = x > 0
+        }, ec)
+        p.success(-1)
+        filtered.get(5, SECONDS) must throwA[NoSuchElementException]
+      }
+    }
+
     "yield a timeout value" in {
       F.Promise.timeout(1, 2).get(1, SECONDS) must equalTo(1)
       F.Promise.timeout(1, 2, MILLISECONDS).get(1, SECONDS) must equalTo(1)
@@ -172,17 +216,10 @@ object FSpec extends Specification
       }
     }
 
-    "combine a sequence of promises from a iterable" in {
+    "combine a sequence of promises from an iterable" in {
       mustExecute(8) { ec =>
         import F.Promise.pure
-        F.Promise.sequence[Int](Arrays.asList(pure(1), pure(2), pure(3)): java.lang.Iterable[F.Promise[_ <: Int]], ec).get(5, SECONDS) must equalTo(Arrays.asList(1, 2, 3))
-      }
-    }
-
-    "combine a sequence of promises from a iterable" in {
-      mustExecute(8) { ec =>
-        import F.Promise.pure
-        F.Promise.sequence[Int](Arrays.asList(pure(1), pure(2), pure(3)): java.lang.Iterable[F.Promise[_ <: Int]], ec).get(5, SECONDS) must equalTo(Arrays.asList(1, 2, 3))
+        F.Promise.sequence[Int](Arrays.asList(pure(1), pure(2), pure(3)), ec).get(5, SECONDS) must equalTo(Arrays.asList(1, 2, 3))
       }
     }
 

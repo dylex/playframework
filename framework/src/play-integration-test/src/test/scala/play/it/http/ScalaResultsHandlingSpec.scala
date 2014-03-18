@@ -5,7 +5,7 @@ package play.it.http
 
 import play.api.mvc._
 import play.api.test._
-import play.api.libs.ws.Response
+import play.api.libs.ws._
 import play.api.libs.iteratee._
 
 import play.api.libs.concurrent.Execution.{defaultContext => ec}
@@ -14,7 +14,7 @@ object ScalaResultsHandlingSpec extends PlaySpecification with WsTestClient {
 
   "scala body handling" should {
 
-    def makeRequest[T](result: SimpleResult)(block: Response => T) = withServer(result) { implicit port =>
+    def makeRequest[T](result: SimpleResult)(block: WSResponse => T) = withServer(result) { implicit port =>
       val response = await(wsUrl("/").get())
       block(response)
     }
@@ -219,6 +219,14 @@ object ScalaResultsHandlingSpec extends PlaySpecification with WsTestClient {
 
       response.status must_== 400
       response.body must beLeft
+    }
+
+    "not send empty chunks before the end of the enumerator stream" in makeRequest(
+      Results.Ok.chunked(Enumerator("foo", "", "bar"))
+    ) { response =>
+      response.header(TRANSFER_ENCODING) must beSome("chunked")
+      response.header(CONTENT_LENGTH) must beNone
+      response.body must_== "foobar"
     }
 
   }

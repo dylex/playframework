@@ -7,6 +7,8 @@ import play.api.mvc._
 import java.io.File
 import scala.util.control.NonFatal
 import scala.concurrent.Future
+import play.api.controllers.HeadAction
+import play.api.http.HttpVerbs
 
 /**
  * Defines an application’s global settings.
@@ -75,11 +77,20 @@ trait GlobalSettings {
    * Default is: route, tag request, then apply filters
    */
   def onRequestReceived(request: RequestHeader): (RequestHeader, Handler) = {
+    val notFoundHandler = Action.async(BodyParsers.parse.empty)(this.onHandlerNotFound)
     val (routedRequest, handler) = onRouteRequest(request) map {
       case handler: RequestTaggingHandler => (handler.tagRequest(request), handler)
       case otherHandler => (request, otherHandler)
     } getOrElse {
-      (request, Action.async(BodyParsers.parse.empty)(_ => this.onHandlerNotFound(request)))
+      // We automatically permit HEAD requests against any GETs without the need to
+      // add an explicit mapping in Routes
+      val missingHandler: Handler = request.method match {
+        case HttpVerbs.HEAD =>
+          new HeadAction(onRouteRequest(request.copy(method = HttpVerbs.GET)).getOrElse(notFoundHandler))
+        case _ =>
+          notFoundHandler
+      }
+      (request, missingHandler)
     }
 
     (routedRequest, doFilter(rh => handler)(routedRequest))
@@ -112,8 +123,9 @@ trait GlobalSettings {
    * @return an action to handle this request - if no action is returned, a 404 not found result will be sent to client
    * @see onHandlerNotFound
    */
-  def onRouteRequest(request: RequestHeader): Option[Handler] = Play.maybeApplication.flatMap(_.routes.flatMap { router =>
-    router.handlerFor(request)
+  def onRouteRequest(request: RequestHeader): Option[Handler] = Play.maybeApplication.flatMap(_.routes.flatMap {
+    router =>
+      router.handlerFor(request)
   })
 
   /**
@@ -126,18 +138,20 @@ trait GlobalSettings {
    * @return The result to send to the client
    */
   def onError(request: RequestHeader, ex: Throwable): Future[SimpleResult] = {
+    def devError = views.html.defaultpages.devError(Option(System.getProperty("play.editor"))) _
+    def prodError = views.html.defaultpages.error.f
     try {
       Future.successful(InternalServerError(Play.maybeApplication.map {
-        case app if app.mode != Mode.Prod => views.html.defaultpages.devError.f
-        case app => views.html.defaultpages.error.f
-      }.getOrElse(views.html.defaultpages.devError.f) {
+        case app if app.mode == Mode.Prod => prodError
+        case app => devError
+      }.getOrElse(devError) {
         ex match {
           case e: UsefulException => e
           case NonFatal(e) => UnexpectedException(unexpected = Some(e))
         }
       }))
     } catch {
-      case e: Throwable => {
+      case NonFatal(e) => {
         Logger.error("Error while rendering default error page", e)
         Future.successful(InternalServerError)
       }

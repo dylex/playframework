@@ -1,4 +1,3 @@
-<!--- Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com> -->
 # Your first Play application
 
 Let’s write a simple task list application with Play and deploy it to the cloud. This is a very small example which can be managed in a few hours.
@@ -74,44 +73,21 @@ That simply tells Play that when the web server receives a GET request for the `
 
 Let’s see what the `controllers.Application.index` method looks like. Open the `todolist/app/controllers/Application.java` source file:
 
-```
-package controllers;
-
-import play.*;
-import play.mvc.*;
-
-import views.html.*;
-
-public class Application extends Controller {
-  
-  public static Result index() {
-    return ok(index.render("Your new application is ready."));
-  }
-  
-}
-```
+@[controller-application](code/javaguide/todo/initial/controllers/Application.java)
 
 You see that `controllers.Application.index()` returns a `Result`. All action methods must return a `Result`, which represents the HTTP response to send back to the web browser.
 
 > **Note:** Read more about [[Actions|JavaActions]].
 
-Here, the action returns a **200 OK** response with an HTML response body. The HTML content is provided by a template. Play templates are compiled to standard Java methods, here as `views.html.index.render(String message)`.
+Here, the action returns a **200 OK** response with a HTML response body. The HTML content is provided by a template. Play templates are compiled to standard Java methods, here as `views.html.index.render(String message)`.
 
 This template is defined in the `app/views/index.scala.html` source file:
 
-```
-@(message: String)
-
-@main("Welcome to Play") {
-    
-    @play20.welcome(message, style = "Java")
-    
-}
-```
+@[index-welcome](code/javaguide/todo/initial/views/index.scala.html)
 
 The first line defines the function signature. Here it takes a single `String` parameter. Then the template content mixes HTML (or any text-based language) with Scala statements. The Scala statements start with the special `@` character.
 
-> **Note:** Don’t worry about the template engine using Scala as its expression language. This is not a problem for a Java developer, and you can almost use it as if the language was Java. We explain the templating system in a bit more deatil below.
+> **Note:** Don’t worry about the template engine using Scala as its expression language. This is not a problem for a Java developer, and you can almost use it as if the language was Java. We explain the templating system in a bit more detail below.
 
 ## Development work-flow
 
@@ -147,45 +123,17 @@ For our todo list application, we need a few actions and the corresponding URLs.
 
 Edit the `conf/routes` file:
 
-```
-# Home page
-GET     /                       controllers.Application.index()
-                                
-# Tasks          
-GET     /tasks                  controllers.Application.tasks()
-POST    /tasks                  controllers.Application.newTask()
-POST    /tasks/:id/delete       controllers.Application.deleteTask(id: Long)
-```
+@[base-routes](code/javaguide/todo/initial/conf/javaguide.todo.initial.routes)
 
 We create a route to list all tasks, and a couple of others to handle task creation and deletion. The route to handle task deletion defines a variable argument `id` in the URL path. This value is then passed to the `deleteTask` action method.
 
-Now if your reload in your browser, you will see that Play cannot compile your routes files:
+Now if you reload in your browser, you will see that Play cannot compile your routes files:
 
 [[images/routes.png]]
 
 This is because the routes reference non-existent action methods. So let’s add them to the `Application.java` file:
 
-```
-public class Application extends Controller {
-  
-  public static Result index() {
-    return ok(index.render("Your new application is ready."));
-  }
-  
-  public static Result tasks() {
-    return TODO;
-  }
-  
-  public static Result newTask() {
-    return TODO;
-  }
-  
-  public static Result deleteTask(Long id) {
-    return TODO;
-  }
-  
-}
-```
+@[full-controller-with-todos](code/javaguide/todo/initial/controllers/ToDoApplication.java)
 
 As you see we use `TODO` as result in our actions implementation. Because we don’t want to write the actions implementation yet, we can use the built-in `TODO` result that will return a `501 Not Implemented` response. 
 
@@ -209,28 +157,7 @@ As you see we use `redirect` instead of `ok` to specify a `303 See Other` respon
 
 Before continuing the implementation we need to define what a `Task` looks like in our application. Create a `class` for it in the `app/models/Task.java` file:
 
-```
-package models;
-
-import java.util.*;
-
-public class Task {
-    
-  public Long id;
-  public String label;
-  
-  public static List<Task> all() {
-    return new ArrayList<Task>();
-  }
-  
-  public static void create(Task task) {
-  }
-  
-  public static void delete(Long id) {
-  }
-    
-}
-```
+@[model-base-task](code/javaguide/todo/initial/models/Task.java)
 
 We have also created a bunch of static methods to manage `Task` operations. For now we wrote dummy implementation for each operation, but later in this tutorial we will write implementations that will store the tasks into a relational database.
 
@@ -283,7 +210,7 @@ We also imported `helper._` that give us the form creation helpers, typically th
 
 ## The task form
 
-A `Form` object encapsulates an HTML form definition, including validation constraints. Let’s create a form for our `Task` class. Add this to your `Application` controller:
+A `Form` object encapsulates a HTML form definition, including validation constraints. Let’s create a form for our `Task` class. Add this to your `Application` controller:
 
 ```
 static Form<Task> taskForm = Form.form(Task.class);
@@ -393,18 +320,7 @@ public class Task extends Model {
 
 We made the `Task` class extend the `play.db.ebean.Model` super class to have access to Play built-in Ebean helper. We also added proper persistence annotations, and created a `find` helper to initiate queries.
 
-Next there need to be done some changes in the configuration file. Open `application.conf` and uncomment the following lines:
-
-```
-#db.default.driver=org.h2.Driver
-#db.default.url="jdbc:h2:mem:play"
-#db.default.user=sa
-#db.default.password=""
-
-#ebean.default="models.*"
-```
-
-Finally, let’s implement the CRUD operations:
+Let’s implement the CRUD operations:
 
 ```
 public static List<Task> all() {
@@ -419,10 +335,6 @@ public static void delete(Long id) {
   find.ref(id).delete();
 }
 ```
-
-When you now reload the web page you shoud see the following error message: `Database 'default' needs evolution!`
-
-Click the button `Apply this script now!`, to instruct play to create all necessary database files.
 
 Now you can play again with the application, creating new tasks should work.
 
@@ -446,22 +358,17 @@ public static Result deleteTask(Long id) {
 All features are completed. It’s time to deploy our application in production. Let’s deploy it to heroku. First you have to create a `Procfile` for Heroku in the root application directory:
 
 ```
-web: target/start -Dhttp.port=${PORT} -DapplyEvolutions.default=true -Ddb.default.url=${DATABASE_URL} -Ddb.default.driver=org.postgresql.Driver
+web: target/universal/stage/bin/{your project name} -Dhttp.port=${PORT} -DapplyEvolutions.default=true -Ddb.default.url=${DATABASE_URL} -Ddb.default.driver=org.postgresql.Driver
 ```
 
 > **Note:** Read more about [[Deploying to Heroku|ProductionHeroku]].
 
 Using system properties we override the application configuration when running on Heroku. But since heroku provides a PostgreSQL database we’ll have to add the required driver to our application dependencies. 
 
-Specify it into the `build.sbt` file:
+Specify it in the `build.sbt` file:
 
-```scala
-libraryDependencies ++= Seq(
-  javaJdbc,
-  javaEbean,
-  cache,
-  "postgresql" % "postgresql" % "8.4-702.jdbc4"
-)
+```
+libraryDependencies += "postgresql" % "postgresql" % "8.4-702.jdbc4"
 ```
 
 > **Note:** Read more about [[Dependencies management|SBTDependencies]].

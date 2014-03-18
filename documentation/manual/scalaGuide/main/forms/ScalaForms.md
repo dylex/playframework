@@ -84,6 +84,7 @@ The out of the box constraints are defined on the [Forms object](api/scala/index
 * [`email`](api/scala/index.html#play.api.data.Forms$@email%3AMapping%5BString%5D): maps to `scala.String`, using an email regular expression.
 * [`boolean`](api/scala/index.html#play.api.data.Forms$@boolean%3AMapping%5BBoolean%5D): maps to `scala.Boolean`.
 * [`checked`](api/scala/index.html#play.api.data.Forms$@checked%3AMapping%5BBoolean%5D): maps to `scala.Boolean`.
+* [`optional`](api/scala/index.html#play.api.data.Forms): maps to `scala.Option`.
 
 ### Defining ad-hoc constraints
 
@@ -209,7 +210,7 @@ Sometimes you’ll want to populate a form with existing values, typically for e
 
 @[userForm-filled](code/ScalaForms.scala)
 
-When you use this with a view helper, the value of the element will be filled with with the value:
+When you use this with a view helper, the value of the element will be filled with the value:
 
 ```html
 @helper.inputText(filledForm("name")) @* will render value="Bob" *@
@@ -255,9 +256,28 @@ A form mapping can also define optional values using [`Forms.optional`](api/scal
 
 This maps to an `Option[A]` in output, which is `None` if no form value is found.
 
+### Default values
+
+You can populate a form with initial values using [`Form#fill`](api/scala/index.html#play.api.data.Form):
+
+```
+val filledForm = userForm.fill(User("Bob", 18))
+```
+
+Or you can define a default mapping on the number using [`Forms.default`](api/scala/index.html#play.api.data.Forms$):
+
+```
+Form(
+  mapping(
+    "name" -> default(text, "Bob")
+    "age" -> default(number, 18)
+  )(User.apply)(User.unapply)
+)
+```
+
 ### Ignored values
 
-If you want a form to have a static value for a field, use `Forms.ignored`:
+If you want a form to have a static value for a field, use [`Forms.ignored`](api/scala/index.html#play.api.data.Forms$):
 
 @[userForm-static-value](code/ScalaForms.scala)
 
