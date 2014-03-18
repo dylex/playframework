@@ -42,10 +42,15 @@ object `package` {
 
   }
 
-  implicit def functionMonoid[A] = new Monoid[A => A] {
-    override def append(f1: A => A, f2: A => A) = f2 compose f1
-    override def identity = Predef.identity
+  implicit def functionArrow: Arrow[Function1] = new Arrow[Function1] {
+    def identity[A] = Predef.identity[A]
+    def arr[A, B](f: A => B) = f
+    def compose[A, B, C](f: B => C, g: A => B): A => C = f compose g
   }
+
+  implicit def toArrowOps[A[_, _], B, C](f: A[B, C])(implicit a: Arrow[A]): ArrowOps[A, B, C] = new ArrowOps(f)
+
+  implicit def functionMonoid[A]: Monoid[A => A] = functionArrow.monoid[A]
 
   implicit def toMonoidOps[A](a: A)(implicit m: Monoid[A]): MonoidOps[A] = new MonoidOps(a)
 
