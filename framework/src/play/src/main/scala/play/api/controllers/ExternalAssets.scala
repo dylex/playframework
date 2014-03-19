@@ -39,7 +39,7 @@ object ExternalAssets extends Controller {
    * @param absoluteRootPath the root folder for searching the static resource files such as `"/home/peter/public"`, `C:\external` or `relativeToYourApp`
    * @param file the file part extracted from the URL
    */
-  def at(rootPath: String, file: String): Action[AnyContent] = Action { request =>
+  def at(rootPath: String, file: String): Action[AnyContent] = Action[AnyContent] { request =>
     Play.mode match {
       case Mode.Prod => NotFound
       case _ => {

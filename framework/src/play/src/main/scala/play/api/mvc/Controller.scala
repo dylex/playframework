@@ -31,7 +31,7 @@ trait Controller extends Results with BodyParsers with HttpProtocol with Status 
    * def index(name:String) = TODO
    * }}}
    */
-  val TODO = Action {
+  val TODO = Action[AnyContent] {
     NotImplemented[play.api.templates.Html](views.html.defaultpages.todo())
   }
 

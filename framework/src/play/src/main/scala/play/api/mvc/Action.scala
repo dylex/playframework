@@ -367,28 +367,33 @@ trait ActionFunction[-R, +P] {
 
 object ActionFunction {
   implicit object Arrow extends Arrow[ActionFunction] {
-    def compose[B, C, D](f: ActionFunction[C, D], g: ActionFunction[B, C]): ActionFunction[B, D] = new ActionFunction[B, D] {
-      def invokeBlock(request: B, block: D => Future[SimpleResult]): Future[SimpleResult] = {
+    def identity[R] = new ActionFunction[R, R] {
+      def invokeBlock(request: R, block: R => Future[SimpleResult]): Future[SimpleResult] = {
+        block(request)
+      }
+    }
+    def arr[P, R](f: P => R) = new ActionFunction[P, R] {
+      def invokeBlock(request: P, block: R => Future[SimpleResult]): Future[SimpleResult] = {
+        block(f(request))
+      }
+    }
+    def compose[P, Q, R](f: ActionFunction[Q, R], g: ActionFunction[P, Q]): ActionFunction[P, R] = new ActionFunction[P, R] {
+      def invokeBlock(request: P, block: R => Future[SimpleResult]): Future[SimpleResult] = {
         g.invokeBlock(request, r => f.invokeBlock(r, block))
       }
     }
   }
-}
 
-trait HigherOrderActionFunction[-R[_], +P[_], A] extends ActionFunction[R[A], P[A]]
+  import scala.language.implicitConversions
 
-trait ActionBuilderFunction[+P[_], A] extends HigherOrderActionFunction[Request, P, A]
-
-object HigherOrderActionFunction {
-  def identity[A]: ActionBuilderFunction[Request, A] = new ActionBuilderFunction[Request, A] {
-    def invokeBlock(request: Request[A], block: Request[A] => Future[SimpleResult]) = block(request)
-  }
+  implicit def toActionBuilder[R[_]](invoker: ActionFunction[Request[AnyContent], R[AnyContent]]): ActionBuilder[R] = new ActionBuilder[R](invoker)
+  implicit def toGenericActionBuilder[R[_], A](invoker: ActionFunction[Request[A], R[A]]): GenericActionBuilder[R, A] = new GenericActionBuilder[R, A](invoker)
 }
 
 /**
  * Provides helpers for creating `Action` values.
  */
-class GenericActionBuilder[+R[_], A](invoker: HigherOrderActionFunction[Request, R, A]) {
+class GenericActionBuilder[+R[_], A](invoker: ActionFunction[Request[A], R[A]]) {
 
   /**
    * Constructs an `Action`.
@@ -461,7 +466,7 @@ class GenericActionBuilder[+R[_], A](invoker: HigherOrderActionFunction[Request,
 /**
  * Provides helpers for creating `Action` values.
  */
-class ActionBuilder[+R[_]](invoker: HigherOrderActionFunction[Request, R, AnyContent]) extends GenericActionBuilder[R, AnyContent](invoker) {
+class ActionBuilder[+R[_]](invoker: ActionFunction[Request[AnyContent], R[AnyContent]]) extends GenericActionBuilder[R, AnyContent](invoker) {
 
   /**
    * Constructs an `Action` with default content.
@@ -494,23 +499,6 @@ class ActionBuilder[+R[_]](invoker: HigherOrderActionFunction[Request, R, AnyCon
   final def apply(block: => Result): Action[AnyContent] = apply(_ => block)
 
   /**
-   * Constructs an `Action` that returns a future of a result, with default content, and no request parameter.
-   *
-   * For example:
-   * {{{
-   * val hello = Action.async {
-   *   WS.url("http://www.playframework.com").get().map { r =>
-   *     if (r.status == 200) Ok("The website is up") else NotFound("The website is down")
-   *   }
-   * }
-   * }}}
-   *
-   * @param block the action code
-   * @return an action
-   */
-  final def async(block: => Future[SimpleResult]): Action[AnyContent] = async(_ => block)
-
-  /**
    * Constructs an `Action` that returns a future of a result, with default content.
    *
    * For example:
@@ -527,6 +515,23 @@ class ActionBuilder[+R[_]](invoker: HigherOrderActionFunction[Request, R, AnyCon
    */
   final def async(block: R[AnyContent] => Future[SimpleResult]): Action[AnyContent] = async(BodyParsers.parse.anyContent)(block)
 
+  /**
+   * Constructs an `Action` that returns a future of a result, with default content, and no request parameter.
+   *
+   * For example:
+   * {{{
+   * val hello = Action.async {
+   *   WS.url("http://www.playframework.com").get().map { r =>
+   *     if (r.status == 200) Ok("The website is up") else NotFound("The website is down")
+   *   }
+   * }
+   * }}}
+   *
+   * @param block the action code
+   * @return an action
+   */
+  final def async(block: => Future[SimpleResult]): Action[AnyContent] = async(_ => block)
+
 }
 
 /* NOTE: the following are all example uses of ActionFunction, each subtly
@@ -538,7 +543,7 @@ class ActionBuilder[+R[_]](invoker: HigherOrderActionFunction[Request, R, AnyCon
  * its Action block with a parameter (of type P).
  * The critical (abstract) function is refine.
  */
-trait ActionRefiner[-R[_], +P[_], A] extends HigherOrderActionFunction[R, P, A] {
+trait ActionRefiner[-R, +P] extends ActionFunction[R, P] {
   /**
    * Determine how to process a request.  This is the main method than an ActionRefiner has to implement.
    * It can decide to immediately intercept the request and return a SimpleResult (Left), or continue processing with a new parameter of type P (Right).
@@ -546,9 +551,9 @@ trait ActionRefiner[-R[_], +P[_], A] extends HigherOrderActionFunction[R, P, A] 
    * @param request the input request
    * @return Either a result or a new parameter to pass to the Action block
    */
-  protected def refine(request: R[A]): Future[Either[SimpleResult, P[A]]]
+  protected def refine(request: R): Future[Either[SimpleResult, P]]
 
-  final def invokeBlock(request: R[A], block: P[A] => Future[SimpleResult]) =
+  final def invokeBlock(request: R, block: P => Future[SimpleResult]) =
     refine(request).flatMap(_.fold(Future.successful _, block))(executionContext)
 }
 
@@ -557,16 +562,16 @@ trait ActionRefiner[-R[_], +P[_], A] extends HigherOrderActionFunction[R, P, A] 
  * unconditionally transforms it to a new parameter type (P) to be passed to
  * its Action block.  The critical (abstract) function is transform.
  */
-trait ActionTransformer[-R[_], +P[_], A] extends ActionRefiner[R, P, A] {
+trait ActionTransformer[-R, +P] extends ActionRefiner[R, P] {
   /**
    * Augment or transform an existing request.  This is the main method than an ActionTransformer has to implement.
    *
    * @param request the input request
    * @return The new parameter to pass to the Action block
    */
-  protected def transform(request: R[A]): Future[P[A]]
+  protected def transform(request: R): Future[P]
 
-  final def refine(request: R[A]) =
+  final def refine(request: R) =
     transform(request).map(Right(_))(executionContext)
 }
 
@@ -576,7 +581,7 @@ trait ActionTransformer[-R[_], +P[_], A] extends ActionRefiner[R, P, A] {
  * continue its Action block with the same request.
  * The critical (abstract) function is filter.
  */
-trait ActionFilter[R[_], A] extends ActionRefiner[R, R, A] {
+trait ActionFilter[R] extends ActionRefiner[R, R] {
   /**
    * Determine whether to process a request.  This is the main method than an ActionFilter has to implement.
    * It can decide to immediately intercept the request and return a SimpleResult (Some), or continue processing (None).
@@ -584,8 +589,8 @@ trait ActionFilter[R[_], A] extends ActionRefiner[R, R, A] {
    * @param request the input request
    * @return An optional SimpleResult with which to abort the request
    */
-  protected def filter(request: R[A]): Future[Option[SimpleResult]]
+  protected def filter(request: R): Future[Option[SimpleResult]]
 
-  final protected def refine(request: R[A]) =
+  final protected def refine(request: R) =
     filter(request).map(_.toLeft(request))(executionContext)
 }

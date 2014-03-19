@@ -31,11 +31,6 @@ package object mvc {
 
   }
 
-  import scala.language.implicitConversions
-  import scala.language.higherKinds
-
-  implicit def toGenericActionBuilder[R[_], A](invoker: HigherOrderActionFunction[Request, R, A]): GenericActionBuilder[R, A] = new GenericActionBuilder[R, A](invoker)
-  implicit def toActionBuilder[R[_]](invoker: HigherOrderActionFunction[Request, R, AnyContent]): ActionBuilder[R] = new ActionBuilder[R](invoker)
-  def Action[A]: HigherOrderActionFunction[Request, Request, A] = HigherOrderActionFunction.identity[A]
+  def Action[A]: ActionFunction[Request[A], Request[A]] = ActionFunction.Arrow.identity[Request[A]]
 
 }

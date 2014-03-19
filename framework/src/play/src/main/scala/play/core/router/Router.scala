@@ -246,7 +246,7 @@ object Router {
 
     //
 
-    def badRequest(error: String) = Action.async { request =>
+    def badRequest(error: String) = Action[AnyContent].async { request =>
       play.api.Play.maybeApplication.map(_.global.onBadRequest(request, error)).getOrElse(play.api.DefaultGlobal.onBadRequest(request, error))
     }
 

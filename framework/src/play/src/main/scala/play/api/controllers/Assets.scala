@@ -65,7 +65,7 @@ class AssetsBuilder extends Controller {
    * @param path the root folder for searching the static resource files, such as `"/public"`. Not URL encoded.
    * @param file the file part extracted from the URL. May be URL encoded (note that %2F decodes to literal /).
    */
-  def at(path: String, file: String): Action[AnyContent] = Action { request =>
+  def at(path: String, file: String): Action[AnyContent] = Action[AnyContent] { request =>
     def parseDate(date: String): Option[java.util.Date] = try {
       //jodatime does not parse timezones, so we handle that manually
       val d = dfp.parseDateTime(date.replace(parsableTimezoneCode, "")).toDate

@@ -38,7 +38,7 @@ object Default extends Controller {
    * GET   /favicon.ico     controllers.Default.notFound
    * }}}
    */
-  def notFound: Action[AnyContent] = Action {
+  def notFound: Action[AnyContent] = Action[AnyContent] {
     NotFound
   }
 
@@ -50,7 +50,7 @@ object Default extends Controller {
    * GET   /google          controllers.Default.redirect(to = "http://www.google.com")
    * }}}
    */
-  def redirect(to: String): Action[AnyContent] = Action {
+  def redirect(to: String): Action[AnyContent] = Action[AnyContent] {
     Redirect(to)
   }
 
@@ -62,7 +62,7 @@ object Default extends Controller {
    * GET   /xxx             controllers.Default.error
    * }}}
    */
-  def error: Action[AnyContent] = Action {
+  def error: Action[AnyContent] = Action[AnyContent] {
     InternalServerError
   }
 

@@ -130,7 +130,7 @@ object Security {
    */
   class AuthenticatedBuilder[U, A](userinfo: RequestHeader => Option[U],
     onUnauthorized: RequestHeader => SimpleResult = _ => Unauthorized(views.html.defaultpages.unauthorized()))
-      extends ActionBuilderFunction[({ type R[A] = AuthenticatedRequest[A, U] })#R, A] {
+      extends ActionFunction[Request[A], AuthenticatedRequest[A, U]] {
 
     def invokeBlock(request: Request[A], block: (AuthenticatedRequest[A, U]) => Future[SimpleResult]) =
       authenticate(request, block)
